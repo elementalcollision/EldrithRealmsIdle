@@ -42,6 +42,7 @@ class UIManager:
         self.show_load_dialog = False
         self.show_export_dialog = False
         self.show_import_dialog = False
+        self.show_settings_panel = False
         self.show_notification_detail = False
         self.current_notification = None
         self.close_button_rect = None
@@ -197,40 +198,47 @@ class UIManager:
         self.create_research_panels()
         self.create_prestige_panels()
         
-        # Create save/load buttons
+        # Create buttons for top row
         button_width = 100
         button_height = 30
-        self.save_button = Button(
+        
+        # Create settings button with sprocket icon
+        self.settings_button = Button(
             pygame.Rect(self.screen_width - button_width - 10, 110, button_width, button_height),
-            "Save Game"
-        )
-        
-        self.load_button = Button(
-            pygame.Rect(self.screen_width - 2 * button_width - 20, 110, button_width, button_height),
-            "Load Game"
-        )
-        
-        # Create export/import save string buttons
-        self.export_button = Button(
-            pygame.Rect(self.screen_width - 3 * button_width - 30, 110, button_width, button_height),
-            "Export Save"
-        )
-        
-        self.import_button = Button(
-            pygame.Rect(self.screen_width - 4 * button_width - 40, 110, button_width, button_height),
-            "Import Save"
+            "⚙ Settings"
         )
         
         # Create prestige button
         self.prestige_button = Button(
-            pygame.Rect(self.screen_width - 5 * button_width - 50, 110, button_width, button_height),
+            pygame.Rect(self.screen_width - 2 * button_width - 20, 110, button_width, button_height),
             "Prestige"
         )
         
         # Create time warp button
         self.time_warp_button = Button(
-            pygame.Rect(self.screen_width - 6 * button_width - 60, 110, button_width, button_height),
+            pygame.Rect(self.screen_width - 3 * button_width - 30, 110, button_width, button_height),
             "Time Warp"
+        )
+        
+        # Create settings panel buttons (these will be shown in the settings panel)
+        self.save_button = Button(
+            pygame.Rect(0, 0, button_width, button_height),  # Position will be set when panel is shown
+            "Save Game"
+        )
+        
+        self.load_button = Button(
+            pygame.Rect(0, 0, button_width, button_height),  # Position will be set when panel is shown
+            "Load Game"
+        )
+        
+        self.export_button = Button(
+            pygame.Rect(0, 0, button_width, button_height),  # Position will be set when panel is shown
+            "Export Save"
+        )
+        
+        self.import_button = Button(
+            pygame.Rect(0, 0, button_width, button_height),  # Position will be set when panel is shown
+            "Import Save"
         )
         
     def create_race_panels(self):
@@ -476,32 +484,57 @@ class UIManager:
                 if button.is_clicked(self.mouse_pos):
                     self.active_tab = tab
             
-            # Handle save/load buttons
-            if self.save_button.is_clicked(self.mouse_pos):
-                self.show_save_dialog = True
-                self.dialog_input_text = "save.json"
-                self.dialog_cursor_pos = len(self.dialog_input_text)
+            # Handle settings button
+            if self.settings_button.is_clicked(self.mouse_pos):
+                self.show_settings_panel = not self.show_settings_panel
+                return
             
-            if self.load_button.is_clicked(self.mouse_pos):
-                self.show_load_dialog = True
-                self.dialog_input_text = "save.json"
-                self.dialog_cursor_pos = len(self.dialog_input_text)
+            # Handle settings panel buttons if panel is shown
+            if self.show_settings_panel:
+                # Update button positions based on settings panel
+                settings_panel_rect = self._get_settings_panel_rect()
+                button_spacing = 10
+                button_width = 120
+                button_height = 30
                 
-            # Handle export/import buttons
-            if self.export_button.is_clicked(self.mouse_pos):
-                save_string = self.game_state.export_save_string()
-                if save_string:
-                    self.show_export_dialog = True
-                    self.dialog_input_text = save_string
-                    self.dialog_cursor_pos = 0  # Start at beginning for easier selection
-                    self.game_state.add_notification("Save exported! Copy the text below.")
-                else:
-                    self.game_state.add_notification("Failed to export save!")
-            
-            if self.import_button.is_clicked(self.mouse_pos):
-                self.show_import_dialog = True
-                self.dialog_input_text = ""
-                self.dialog_cursor_pos = 0
+                # Check if any settings buttons were clicked
+                if self.save_button.is_clicked(self.mouse_pos):
+                    self.show_settings_panel = False
+                    self.show_save_dialog = True
+                    self.dialog_input_text = "save.json"
+                    self.dialog_cursor_pos = len(self.dialog_input_text)
+                    return
+                
+                if self.load_button.is_clicked(self.mouse_pos):
+                    self.show_settings_panel = False
+                    self.show_load_dialog = True
+                    self.dialog_input_text = "save.json"
+                    self.dialog_cursor_pos = len(self.dialog_input_text)
+                    return
+                    
+                if self.export_button.is_clicked(self.mouse_pos):
+                    self.show_settings_panel = False
+                    save_string = self.game_state.export_save_string()
+                    if save_string:
+                        self.show_export_dialog = True
+                        self.dialog_input_text = save_string
+                        self.dialog_cursor_pos = 0  # Start at beginning for easier selection
+                        self.game_state.add_notification("Save exported! Copy the text below.")
+                    else:
+                        self.game_state.add_notification("Failed to export save!")
+                    return
+                
+                if self.import_button.is_clicked(self.mouse_pos):
+                    self.show_settings_panel = False
+                    self.show_import_dialog = True
+                    self.dialog_input_text = ""
+                    self.dialog_cursor_pos = 0
+                    return
+                    
+                # Check if clicked outside the settings panel to close it
+                if not settings_panel_rect.collidepoint(self.mouse_pos):
+                    self.show_settings_panel = False
+                    return
             
             # Handle prestige button
             if self.prestige_button.is_clicked(self.mouse_pos):
@@ -574,6 +607,9 @@ class UIManager:
                             self.game_state.purchase_prestige_upgrade(upgrade_id)
     
     def update(self):
+        # Update mouse position
+        self.mouse_pos = pygame.mouse.get_pos()
+        
         # Check for autosave
         current_time = pygame.time.get_ticks()
         if current_time - self.last_autosave_time > self.autosave_interval:
@@ -581,11 +617,18 @@ class UIManager:
                 self.game_state.add_notification("Game autosaved!")
             self.last_autosave_time = current_time
         
+        # Update settings panel button positions if panel is shown
+        if self.show_settings_panel:
+            self._update_settings_panel_buttons()
+        
         # Update tab buttons
         for button in self.tab_buttons.values():
             button.update(self.mouse_pos)
         
-        # Update save/load buttons
+        # Update settings button
+        self.settings_button.update(self.mouse_pos)
+        
+        # Update settings panel buttons
         self.save_button.update(self.mouse_pos)
         self.load_button.update(self.mouse_pos)
         self.export_button.update(self.mouse_pos)
@@ -715,13 +758,14 @@ class UIManager:
         # Render notification panel
         self.notification_panel.render(self.screen)
         
-        # Render save/load buttons
-        self.save_button.render(self.screen)
-        self.load_button.render(self.screen)
-        self.export_button.render(self.screen)
-        self.import_button.render(self.screen)
+        # Render top row buttons
+        self.settings_button.render(self.screen)
         self.prestige_button.render(self.screen)
         self.time_warp_button.render(self.screen)
+        
+        # Render settings panel if active
+        if self.show_settings_panel:
+            self._render_settings_panel()
         
         # Render dialogs if active
         if self.show_save_dialog:
@@ -1328,6 +1372,60 @@ class UIManager:
         close_text = self.font.render("Close", True, TEXT_COLOR)
         self.screen.blit(close_text, (close_button_rect.x + (close_button_rect.width - close_text.get_width()) // 2, 
                                      close_button_rect.y + (close_button_rect.height - close_text.get_height()) // 2))
+    
+    def _get_settings_panel_rect(self):
+        """Get the rectangle for the settings panel"""
+        panel_width = 150
+        panel_height = 180
+        panel_x = self.settings_button.rect.x - panel_width + self.settings_button.rect.width
+        panel_y = self.settings_button.rect.y + self.settings_button.rect.height + 5
+        return pygame.Rect(panel_x, panel_y, panel_width, panel_height)
+    
+    def _update_settings_panel_buttons(self):
+        """Update the positions of buttons in the settings panel"""
+        panel_rect = self._get_settings_panel_rect()
+        button_width = 120
+        button_height = 30
+        button_spacing = 10
+        
+        # Position buttons within the panel
+        self.save_button.rect = pygame.Rect(
+            panel_rect.x + (panel_rect.width - button_width) // 2,
+            panel_rect.y + button_spacing,
+            button_width, button_height
+        )
+        
+        self.load_button.rect = pygame.Rect(
+            panel_rect.x + (panel_rect.width - button_width) // 2,
+            panel_rect.y + button_height + 2 * button_spacing,
+            button_width, button_height
+        )
+        
+        self.export_button.rect = pygame.Rect(
+            panel_rect.x + (panel_rect.width - button_width) // 2,
+            panel_rect.y + 2 * button_height + 3 * button_spacing,
+            button_width, button_height
+        )
+        
+        self.import_button.rect = pygame.Rect(
+            panel_rect.x + (panel_rect.width - button_width) // 2,
+            panel_rect.y + 3 * button_height + 4 * button_spacing,
+            button_width, button_height
+        )
+    
+    def _render_settings_panel(self):
+        """Render the settings panel with save/load/import/export buttons"""
+        panel_rect = self._get_settings_panel_rect()
+        
+        # Draw panel background
+        pygame.draw.rect(self.screen, (60, 60, 70), panel_rect)  # Dark gray background
+        pygame.draw.rect(self.screen, (100, 100, 120), panel_rect, 2)  # Border
+        
+        # Render buttons
+        self.save_button.render(self.screen)
+        self.load_button.render(self.screen)
+        self.export_button.render(self.screen)
+        self.import_button.render(self.screen)
     
     def _render_import_dialog(self):
         """Render the import save dialog"""

@@ -594,7 +594,7 @@ class GameState:
             
         return costs
     
-    def get_prestige_upgrade_cost(self, upgrade_id):
+    def get_prestige_upgrade_cost(self, upgrade_id, count=1):
         """Calculate the cost for a prestige upgrade"""
         if upgrade_id not in PRESTIGE_UPGRADES:
             return {}
@@ -603,17 +603,31 @@ class GameState:
         upgrade_data = self.prestige_upgrades[upgrade_id]
         
         base_costs = upgrade_info["cost"]
-        level = upgrade_data["level"]
-        
-        # Some upgrades have fixed costs, others scale
-        cost_multiplier = 1.0
-        if level > 0 and "cost_scaling" in upgrade_info:
-            cost_multiplier = upgrade_info["cost_scaling"] ** level
+        current_level = upgrade_data["level"]
         
         # Calculate costs for each resource
         costs = {}
-        for resource, amount in base_costs.items():
-            costs[resource] = amount * cost_multiplier
+        
+        if count == 1:
+            # Simple case: just one upgrade
+            cost_multiplier = 1.0
+            if current_level > 0 and "cost_scaling" in upgrade_info:
+                cost_multiplier = upgrade_info["cost_scaling"] ** current_level
+            
+            # Calculate costs for each resource
+            for resource, amount in base_costs.items():
+                costs[resource] = amount * cost_multiplier
+        else:
+            # Bulk upgrade: sum up costs for each level
+            for resource, base_amount in base_costs.items():
+                total_cost = 0
+                for i in range(count):
+                    level_cost_multiplier = 1.0
+                    if (current_level + i) > 0 and "cost_scaling" in upgrade_info:
+                        level_cost_multiplier = upgrade_info["cost_scaling"] ** (current_level + i)
+                    
+                    total_cost += base_amount * level_cost_multiplier
+                costs[resource] = total_cost
             
         return costs
     
