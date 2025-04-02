@@ -498,9 +498,18 @@ class BuildingPanel:
         
         # Draw building production with appropriate color
         production_text = []
-        for resource, amount in self.building_info["resource_production"].items():
-            current_production = amount * self.building_data['level'] * self.game_state.get_production_multiplier(resource)
-            production_text.append(f"{resource.capitalize()}: +{current_production:.1f}/s")
+        if "resource_production" in self.building_info:
+            for resource, amount in self.building_info["resource_production"].items():
+                current_production = amount * self.building_data['level'] * self.game_state.get_production_multiplier(resource)
+                production_text.append(f"{resource.capitalize()}: +{current_production:.1f}/s")
+        # Handle buildings with global multipliers instead of direct resource production
+        elif "global_multipliers" in self.building_info:
+            for resource, multiplier in self.building_info["global_multipliers"].items():
+                effect_multiplier = multiplier ** self.building_data['level']
+                if resource == "all":
+                    production_text.append(f"All resources: x{effect_multiplier:.2f}")
+                else:
+                    production_text.append(f"{resource.capitalize()}: x{effect_multiplier:.2f}")
         
         if production_text:
             production_str = ", ".join(production_text[:2])  # Show only first two resources to save space
@@ -513,8 +522,11 @@ class BuildingPanel:
         # multiplier is already provided as a parameter
         count = multiplier if multiplier != -1 else 1  # Use 1 for display, 'Max' is handled differently
         
+        # Ensure count is an integer for the get_building_purchase_cost method
+        purchase_count = int(count) if count != -1 else count
+        
         # Draw purchase cost with current multiplier
-        cost = self.game_state.get_building_purchase_cost(self.building_id, count)
+        cost = self.game_state.get_building_purchase_cost(self.building_id, purchase_count)
         cost_text_parts = []
         for resource, amount in cost.items():
             cost_text_parts.append(f"{resource.capitalize()}: {amount:.1f}")
@@ -547,9 +559,12 @@ class BuildingPanel:
             self.upgrade_button.render(surface)
             
             # Draw upgrade cost if not at max level
-            # multiplier is already provided as a parameterer if multiplier != -1 else 1
+            # multiplier is already provided as a parameter
             
-            upgrade_cost = self.game_state.get_building_upgrade_cost(self.building_id, count)
+            # Ensure count is an integer for the get_building_upgrade_cost method
+            upgrade_count = int(count) if count != -1 else count
+            
+            upgrade_cost = self.game_state.get_building_upgrade_cost(self.building_id, upgrade_count)
             upgrade_text_parts = []
             for resource, amount in upgrade_cost.items():
                 upgrade_text_parts.append(f"{resource.capitalize()}: {amount:.1f}")

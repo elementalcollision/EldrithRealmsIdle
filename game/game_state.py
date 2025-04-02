@@ -303,10 +303,24 @@ class GameState:
             return True
         return False
     
-    def upgrade_race(self, race_id):
+    def upgrade_race(self, race_id, count=1):
         """Upgrade a specific race"""
         if race_id in self.races and self.races[race_id]["unlocked"] and self.races[race_id]["count"] > 0:
-            self.races[race_id]["level"] += 1
+            # Get race info to check for any level limits
+            race_info = RACES[race_id]
+            
+            # Some races might have max levels defined in the future
+            max_level = race_info.get("max_level", float('inf'))
+            current_level = self.races[race_id]["level"]
+            
+            # Calculate how many levels we can actually upgrade
+            possible_upgrades = max_level - current_level if max_level != float('inf') else count
+            actual_upgrades = min(count, possible_upgrades)
+            
+            if actual_upgrades <= 0:
+                return False
+                
+            self.races[race_id]["level"] += actual_upgrades
             return True
         return False
     
@@ -322,15 +336,22 @@ class GameState:
             return True
         return False
     
-    def upgrade_building(self, building_id):
+    def upgrade_building(self, building_id, count=1):
         """Upgrade a specific building"""
         if building_id in self.buildings and self.buildings[building_id]["unlocked"] and self.buildings[building_id]["count"] > 0:
             # Check if at max level
             building_info = BUILDINGS[building_id]
-            if self.buildings[building_id]["level"] >= building_info["max_level"]:
+            current_level = self.buildings[building_id]["level"]
+            max_level = building_info["max_level"]
+            
+            # Calculate how many levels we can actually upgrade (limited by max_level)
+            possible_upgrades = max_level - current_level
+            actual_upgrades = min(count, possible_upgrades)
+            
+            if actual_upgrades <= 0:
                 return False
                 
-            self.buildings[building_id]["level"] += 1
+            self.buildings[building_id]["level"] += actual_upgrades
             
             # Check for building level achievements
             self.check_building_achievements()
@@ -571,6 +592,9 @@ class GameState:
         
         base_costs = research_info["cost"]
         current_level = research_data["level"]
+        
+        # Ensure count is an integer
+        count = int(count) if count != -1 else 1
         
         # For bulk research, we need to calculate the cumulative cost
         # of multiple upgrades with increasing costs

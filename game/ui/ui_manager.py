@@ -1,5 +1,6 @@
 import pygame
 import os
+import random
 from game.constants import (SCREEN_WIDTH, SCREEN_HEIGHT, PANEL_COLOR, TEXT_COLOR, 
                            BUTTON_COLOR, BUTTON_HOVER_COLOR, GOLD_COLOR, PURPLE_COLOR, BLUE_COLOR)
 from game.ui.components import (Button, Panel, ResourceDisplay, RacePanel, 
@@ -67,7 +68,8 @@ class UIManager:
             "deepling": (0, 191, 255), # Deep sky blue
             "dragon": (255, 69, 0),    # Red-orange
             "celestial": (255, 215, 0), # Gold
-            "void_walker": (75, 0, 130) # Indigo
+            "void_walker": (75, 0, 130), # Indigo
+            "fae": (221, 160, 221)     # Plum/light purple
         }
         
         # Create directory for race graphics if it doesn't exist
@@ -111,6 +113,18 @@ class UIManager:
                 # Ghostly effect
                 for y in range(8, 64, 4):
                     pygame.draw.line(surface, (200, 200, 255, 128), (16, y), (48, y), 1)
+            elif race_id == "fae":
+                # Butterfly/fairy wings
+                wing_color = (230, 190, 255, 180)  # Lighter purple with transparency
+                # Left wing
+                pygame.draw.ellipse(surface, wing_color, (0, 16, 20, 24))
+                # Right wing
+                pygame.draw.ellipse(surface, wing_color, (44, 16, 20, 24))
+                # Sparkles
+                for _ in range(5):
+                    x = random.randint(8, 56)
+                    y = random.randint(8, 56)
+                    pygame.draw.circle(surface, (255, 255, 255), (x, y), 1)
             
             # Save the surface to the race_graphics dictionary
             self.race_graphics[race_id] = surface
@@ -468,7 +482,7 @@ class UIManager:
                 self._handle_import_dialog_click()
                 return
             elif self.show_notification_detail:
-                if handle_notification_detail_click(self, self.mouse_pos, self.close_button_rect):
+                if self._handle_notification_detail_click(self.mouse_pos, self.close_button_rect):
                     return
                 
             # Check for notification panel clicks
@@ -567,28 +581,82 @@ class UIManager:
             if self.active_tab == "races":
                 # Handle race panel buttons
                 for race_id, panel in self.race_panels.items():
+                    # Get current multiplier from bulk purchase panel
+                    current_multiplier = self.bulk_purchase_panel.get_multiplier()
+                    
                     if panel.buy_button.is_clicked(self.mouse_pos):
-                        cost = self.game_state.get_race_purchase_cost(race_id)
+                        # For Max purchases, calculate the maximum affordable count
+                        if current_multiplier == -1:
+                            base_cost = self.game_state.get_race_purchase_cost(race_id, 1)
+                            max_count = self.game_state.calculate_max_affordable(base_cost)
+                            if max_count > 0:
+                                purchase_count = max_count
+                            else:
+                                continue  # Can't afford any
+                        else:
+                            purchase_count = current_multiplier
+                        
+                        # Calculate cost for the actual count we're purchasing
+                        cost = self.game_state.get_race_purchase_cost(race_id, int(purchase_count))
                         if self.game_state.spend_resources(cost):
-                            self.game_state.add_race(race_id)
+                            self.game_state.add_race(race_id, int(purchase_count))
                     
                     if panel.upgrade_button.is_clicked(self.mouse_pos):
-                        cost = self.game_state.get_race_upgrade_cost(race_id)
+                        # For Max upgrades, calculate the maximum affordable count
+                        if current_multiplier == -1:
+                            base_cost = self.game_state.get_race_upgrade_cost(race_id, 1)
+                            max_count = self.game_state.calculate_max_affordable(base_cost)
+                            if max_count > 0:
+                                upgrade_count = max_count
+                            else:
+                                continue  # Can't afford any
+                        else:
+                            upgrade_count = current_multiplier
+                        
+                        # Calculate cost for the actual count we're upgrading
+                        cost = self.game_state.get_race_upgrade_cost(race_id, int(upgrade_count))
                         if self.game_state.spend_resources(cost):
-                            self.game_state.upgrade_race(race_id)
+                            self.game_state.upgrade_race(race_id, int(upgrade_count))
             
             elif self.active_tab == "buildings":
                 # Handle building panel buttons
                 for building_id, panel in self.building_panels.items():
+                    # Get current multiplier from bulk purchase panel
+                    current_multiplier = self.bulk_purchase_panel.get_multiplier()
+                    
                     if panel.buy_button.is_clicked(self.mouse_pos):
-                        cost = self.game_state.get_building_purchase_cost(building_id)
+                        # For Max purchases, calculate the maximum affordable count
+                        if current_multiplier == -1:
+                            base_cost = self.game_state.get_building_purchase_cost(building_id, 1)
+                            max_count = self.game_state.calculate_max_affordable(base_cost)
+                            if max_count > 0:
+                                purchase_count = max_count
+                            else:
+                                continue  # Can't afford any
+                        else:
+                            purchase_count = current_multiplier
+                        
+                        # Calculate cost for the actual count we're purchasing
+                        cost = self.game_state.get_building_purchase_cost(building_id, int(purchase_count))
                         if self.game_state.spend_resources(cost):
-                            self.game_state.add_building(building_id)
+                            self.game_state.add_building(building_id, int(purchase_count))
                     
                     if panel.upgrade_button.is_clicked(self.mouse_pos):
-                        cost = self.game_state.get_building_upgrade_cost(building_id)
+                        # For Max upgrades, calculate the maximum affordable count
+                        if current_multiplier == -1:
+                            base_cost = self.game_state.get_building_upgrade_cost(building_id, 1)
+                            max_count = self.game_state.calculate_max_affordable(base_cost)
+                            if max_count > 0:
+                                upgrade_count = max_count
+                            else:
+                                continue  # Can't afford any
+                        else:
+                            upgrade_count = current_multiplier
+                        
+                        # Calculate cost for the actual count we're upgrading
+                        cost = self.game_state.get_building_upgrade_cost(building_id, int(upgrade_count))
                         if self.game_state.spend_resources(cost):
-                            self.game_state.upgrade_building(building_id)
+                            self.game_state.upgrade_building(building_id, int(upgrade_count))
             
             elif self.active_tab == "research":
                 # Handle research panel buttons
@@ -777,7 +845,7 @@ class UIManager:
         elif self.show_import_dialog:
             self._render_import_dialog()
         elif self.show_notification_detail:
-            self.close_button_rect = render_notification_detail(self, self.screen)
+            self.close_button_rect = self._render_notification_detail(self.screen)
         
         # Render player level and prestige level
         level_text = self.font.render(f"Level: {self.game_state.player_level}", True, TEXT_COLOR)
@@ -1524,3 +1592,71 @@ class UIManager:
                                       import_button_rect.y + (import_button_rect.height - import_text.get_height()) // 2))
         self.screen.blit(cancel_text, (cancel_button_rect.x + (cancel_button_rect.width - cancel_text.get_width()) // 2, 
                                       cancel_button_rect.y + (cancel_button_rect.height - cancel_text.get_height()) // 2))
+def _render_notification_detail(self, surface):
+    """Render a detailed view of the selected notification"""
+    # Get the notification details
+    notification = self.current_notification
+    if not notification:
+        self.show_notification_detail = False
+        return None
+        
+    # Calculate dialog dimensions and position
+    dialog_width = 500
+    dialog_height = 300
+    dialog_x = (self.screen_width - dialog_width) // 2
+    dialog_y = (self.screen_height - dialog_height) // 2
+    
+    # Draw dialog background
+    dialog_rect = pygame.Rect(dialog_x, dialog_y, dialog_width, dialog_height)
+    pygame.draw.rect(surface, PANEL_COLOR, dialog_rect)
+    pygame.draw.rect(surface, (150, 150, 170), dialog_rect, 2)  # Border
+    
+    # Draw title
+    title = notification.get("title", "Notification")
+    title_surface = self.title_font.render(title, True, TEXT_COLOR)
+    surface.blit(title_surface, (dialog_x + (dialog_width - title_surface.get_width()) // 2, dialog_y + 20))
+    
+    # Draw notification text (with wrapping)
+    text = notification.get("detail", notification.get("text", "No details available."))
+    
+    # Simple text wrapping
+    max_width = dialog_width - 40
+    lines = []
+    current_line = ""
+    
+    for word in text.split():
+        test_line = current_line + (" " if current_line else "") + word
+        if self.font.size(test_line)[0] <= max_width:
+            current_line = test_line
+        else:
+            lines.append(current_line)
+            current_line = word
+    
+    if current_line:
+        lines.append(current_line)
+    
+    # Draw wrapped text
+    for i, line in enumerate(lines):
+        text_surface = self.font.render(line, True, TEXT_COLOR)
+        surface.blit(text_surface, (dialog_x + 20, dialog_y + 70 + i * 25))
+    
+    # Draw close button
+    close_button_rect = pygame.Rect(dialog_x + (dialog_width - 100) // 2, dialog_y + dialog_height - 50, 100, 30)
+    close_button_color = BUTTON_HOVER_COLOR if close_button_rect.collidepoint(self.mouse_pos) else BUTTON_COLOR
+    
+    pygame.draw.rect(surface, close_button_color, close_button_rect)
+    pygame.draw.rect(surface, (150, 150, 170), close_button_rect, 1)  # Border
+    
+    # Draw button text
+    close_text = self.font.render("Close", True, TEXT_COLOR)
+    surface.blit(close_text, (close_button_rect.x + (close_button_rect.width - close_text.get_width()) // 2, 
+                             close_button_rect.y + (close_button_rect.height - close_text.get_height()) // 2))
+    
+    return close_button_rect
+
+def _handle_notification_detail_click(self, mouse_pos, close_button_rect):
+    """Handle clicks in the notification detail view"""
+    if close_button_rect and close_button_rect.collidepoint(mouse_pos):
+        self.show_notification_detail = False
+        return True
+    return False
