@@ -613,7 +613,7 @@ class UIManager:
         # Check for autosave
         current_time = pygame.time.get_ticks()
         if current_time - self.last_autosave_time > self.autosave_interval:
-            if self.game_state.save_game("autosave.json", compress=True):
+            if self.game_state.save_game("autosave.json", compressed=True):
                 self.game_state.add_notification("Game autosaved!")
             self.last_autosave_time = current_time
         
@@ -1084,7 +1084,7 @@ class UIManager:
         # Get compression setting
         use_compression = getattr(self, 'use_compression', False)
         
-        if self.game_state.save_game(filename, compress=use_compression):
+        if self.game_state.save_game(filename, compressed=use_compression):
             self.game_state.add_notification(f"Game saved to {filename}!")
             self.show_save_dialog = False
         else:

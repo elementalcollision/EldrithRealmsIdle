@@ -736,15 +736,18 @@ class GameState:
             elif "all_buildings" in requirement:
                 min_level = requirement["all_buildings"]
                 all_buildings_meet_requirement = True
+                any_buildings_exist = False
                 
                 for building_id, building_data in self.buildings.items():
                     # Only consider unlocked buildings with at least one built
                     if building_data["unlocked"] and building_data["count"] > 0:
+                        any_buildings_exist = True
                         if building_data["level"] < min_level:
                             all_buildings_meet_requirement = False
                             break
                 
-                if all_buildings_meet_requirement:
+                # Only grant achievement if at least one building exists and all meet the level requirement
+                if any_buildings_exist and all_buildings_meet_requirement:
                     self.achievements["building_milestones"][milestone_id] = True
                     self.add_notification(f"Achievement unlocked: {milestone['name']}!")
             
