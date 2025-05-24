@@ -1,5 +1,9 @@
 import pygame
-from game.constants import TEXT_COLOR, BUTTON_COLOR, BUTTON_HOVER_COLOR, PANEL_COLOR, GOLD_COLOR, RACES
+from game.constants import (TEXT_COLOR, BUTTON_COLOR, BUTTON_HOVER_COLOR, PANEL_COLOR, GOLD_COLOR, RACES,
+                           NOTIFICATION_COLOR_ACHIEVEMENT, NOTIFICATION_COLOR_UNLOCK, NOTIFICATION_COLOR_ERROR,
+                           NOTIFICATION_COLOR_INFO, NOTIFICATION_COLOR_SAVE, DEFAULT_NOTIFICATION_COLOR,
+                           NOTIFICATION_PREFIXES, DISABLED_BUTTON_COLOR, DISABLED_TEXT_COLOR,
+                           DISABLED_BUTTON_BORDER_COLOR)
 
 class Panel:
     def __init__(self, rect, color):
@@ -19,31 +23,40 @@ class Button:
         self.hover_color = BUTTON_HOVER_COLOR
         self.is_hovered = False
         self.font = pygame.font.SysFont('Arial', 14)
+        self.enabled = True  # Added enabled attribute
     
     def update(self, mouse_pos):
-        self.is_hovered = self.rect.collidepoint(mouse_pos)
+        if self.enabled:
+            self.is_hovered = self.rect.collidepoint(mouse_pos)
+        else:
+            self.is_hovered = False # Ensure hover is off if disabled
     
     def render(self, surface):
-        # Draw button background
-        color = self.hover_color if self.is_hovered else self.color
-        pygame.draw.rect(surface, color, self.rect)
-        pygame.draw.rect(surface, (150, 150, 170), self.rect, 1)  # Border
-        
-        # Draw text
-        text_surface = self.font.render(self.text, True, TEXT_COLOR)
+        if not self.enabled:
+            # Disabled state
+            pygame.draw.rect(surface, DISABLED_BUTTON_COLOR, self.rect)
+            pygame.draw.rect(surface, DISABLED_BUTTON_BORDER_COLOR, self.rect, 1) # Disabled border
+            text_surface = self.font.render(self.text, True, DISABLED_TEXT_COLOR)
+        else:
+            # Enabled state (existing logic)
+            color = self.hover_color if self.is_hovered else self.color
+            pygame.draw.rect(surface, color, self.rect)
+            pygame.draw.rect(surface, (150, 150, 170), self.rect, 1)  # Original border for enabled
+            text_surface = self.font.render(self.text, True, TEXT_COLOR)
+
         text_rect = text_surface.get_rect(center=self.rect.center)
         surface.blit(text_surface, text_rect)
     
     def is_clicked(self, mouse_pos):
-        return self.rect.collidepoint(mouse_pos)
+        return self.enabled and self.rect.collidepoint(mouse_pos)
 
 class ResourceDisplay:
     def __init__(self, rect, resource_type, game_state):
         self.rect = rect
         self.resource_type = resource_type
         self.game_state = game_state
-        self.font = pygame.font.SysFont('Arial', 14)
-        self.title_font = pygame.font.SysFont('Arial', 16, bold=True)
+        self.font = pygame.font.SysFont('Arial', 18)  # Increased font size
+        self.title_font = pygame.font.SysFont('Arial', 20, bold=True)  # Increased font size
     
     def render(self, surface):
         # Format resource name with first letter capitalized
@@ -60,17 +73,32 @@ class ResourceDisplay:
         
         # Render resource name
         name_surface = self.title_font.render(resource_name, True, text_color)
-        surface.blit(name_surface, (self.rect.x, self.rect.y))
+        # Center the name text within the allocated width if possible, or position at start
+        name_x = self.rect.x + (self.rect.width - name_surface.get_width()) // 2
+        if name_x < self.rect.x: # Ensure it doesn't go off the left edge
+            name_x = self.rect.x + 5 # Small padding
+        surface.blit(name_surface, (name_x, self.rect.y + 5)) # Adjusted y for padding
         
         # Render amount
         amount_text = f"{amount:.1f}"
         amount_surface = self.font.render(amount_text, True, text_color)
-        surface.blit(amount_surface, (self.rect.x, self.rect.y + 20))
+        # Position amount below the name, centered
+        amount_x = self.rect.x + (self.rect.width - amount_surface.get_width()) // 2
+        if amount_x < self.rect.x:
+            amount_x = self.rect.x + 5
+        surface.blit(amount_surface, (amount_x, self.rect.y + 30)) # Adjusted y for new font size and spacing
         
         # Render rate
         rate_text = f"+{rate:.1f}/s"
         rate_surface = self.font.render(rate_text, True, text_color)
-        surface.blit(rate_surface, (self.rect.x + self.rect.width - rate_surface.get_width(), self.rect.y + 20))
+        # Position rate below amount, aligned to the right or centered if space is tight
+        rate_x = self.rect.x + self.rect.width - rate_surface.get_width() - 5 # Small padding from right
+        if rate_x < self.rect.x : # if it's too far left (e.g. very wide rate text)
+            rate_x = self.rect.x + (self.rect.width - rate_surface.get_width()) // 2 # center it
+        if rate_x < self.rect.x: # ensure it doesn't go off the left edge
+            rate_x = self.rect.x + 5
+
+        surface.blit(rate_surface, (rate_x, self.rect.y + 55)) # Adjusted y for new font size and spacing
 
 class RacePanel:
     def __init__(self, rect, race_id, game_state):
@@ -123,16 +151,19 @@ class RacePanel:
         
         # For upgrade button, check if race is owned and can be upgraded
         has_race = self.race_data['count'] > 0
-        if has_race:
+        race_max_level = self.race_info.get('max_level', float('inf')) # Get max_level, default to infinity if not defined
+        at_max_level_for_race = self.race_data['level'] >= race_max_level
+
+        if has_race and not at_max_level_for_race:
             upgrade_cost = self.game_state.get_race_upgrade_cost(self.race_id, count)
             can_afford_upgrade = self.game_state.can_afford(upgrade_cost)
             self.upgrade_button.enabled = can_afford_upgrade
         else:
-            self.upgrade_button.enabled = False
+            self.upgrade_button.enabled = False # Disabled if no race, or at max level
         self.upgrade_button.update(mouse_pos)
         
-        # Check if mouse is hovering over upgrade button for tooltip
-        self.show_upgrade_tooltip = has_race and self.upgrade_button.rect.collidepoint(mouse_pos)
+        # Check if mouse is hovering over upgrade button for tooltip (only if button could be enabled)
+        self.show_upgrade_tooltip = has_race and not at_max_level_for_race and self.upgrade_button.rect.collidepoint(mouse_pos)
         
         # Update race data
         self.race_data = self.game_state.races[self.race_id]
@@ -304,85 +335,113 @@ class RacePanel:
         
     def _prepare_tooltip_data(self):
         """Prepare tooltip data showing upgrade benefits"""
-        # Get upgrade benefits
-        benefits = self.game_state.get_race_upgrade_benefits(self.race_id)
-        if not benefits:
+        tooltip_info = self.game_state.get_race_upgrade_benefits(self.race_id)
+
+        if not tooltip_info:
             return None
-            
-        # Create tooltip text lines
-        tooltip_lines = ["Upgrade Benefits:"]
-        
-        # Add resource bonuses
-        for resource, bonus in benefits.items():
-            if resource == "ability":
-                tooltip_lines.append(bonus)  # Special ability text
-            elif resource == "gold":
-                tooltip_lines.append(f"Gold production: {bonus}")  # Gold bonus
-            elif resource == "wood":
-                tooltip_lines.append(f"Wood production: {bonus}")  # Wood bonus
-            elif resource == "stone":
-                tooltip_lines.append(f"Stone production: {bonus}")  # Stone bonus
-            elif resource == "food":
-                tooltip_lines.append(f"Food production: {bonus}")  # Food bonus
-            elif resource == "mana":
-                tooltip_lines.append(f"Mana production: {bonus}")  # Mana bonus
-            elif resource == "crystal":
-                tooltip_lines.append(f"Crystal production: {bonus}")  # Crystal bonus
+
+        tooltip_lines = []
+
+        # Upgrade Cost
+        cost_text_parts = []
+        if tooltip_info["upgrade_cost"]:
+            for res, amount in tooltip_info["upgrade_cost"].items():
+                cost_text_parts.append(f"{amount:.0f} {res.capitalize()}")
+            cost_str = ", ".join(cost_text_parts) if cost_text_parts else "N/A"
+        else:
+            cost_str = "N/A"
+        tooltip_lines.append(f"Upgrade Cost: {cost_str}")
+        tooltip_lines.append("") # Spacer
+
+        # Current Level Benefits
+        tooltip_lines.append(f"Current Level ({tooltip_info['current_level']}):")
+        if tooltip_info["current_benefits"]:
+            for benefit, value in tooltip_info["current_benefits"].items():
+                tooltip_lines.append(f"  - {benefit}: {value}")
+        else:
+            tooltip_lines.append("  - None")
+        tooltip_lines.append("") # Spacer
+
+        # Next Level Benefits
+        tooltip_lines.append(f"Next Level ({tooltip_info['next_level']}):")
+        if tooltip_info["next_level_benefits"]:
+            for benefit, value in tooltip_info["next_level_benefits"].items():
+                tooltip_lines.append(f"  - {benefit}: {value}")
+        else:
+            tooltip_lines.append("  - None (Max Level Reached or No Further Benefits)")
         
         # Calculate tooltip dimensions
-        line_height = 20
-        padding = 10
-        tooltip_width = 0
-        
-        # Find the widest line to determine tooltip width
+        # Use a smaller font for tooltips to fit more information
+        tooltip_font = pygame.font.SysFont('Arial', 12)
+        line_height = 18  # Adjusted for smaller font
+        padding = 8       # Adjusted for smaller font
+
+        max_line_width = 0
         for line in tooltip_lines:
-            line_width = self.font.size(line)[0]
-            tooltip_width = max(tooltip_width, line_width)
+            line_width = tooltip_font.size(line)[0]
+            max_line_width = max(max_line_width, line_width)
         
-        tooltip_width += padding * 2
+        tooltip_width = max_line_width + padding * 2
         tooltip_height = len(tooltip_lines) * line_height + padding * 2
         
         # Position tooltip above the upgrade button
-        tooltip_x = self.upgrade_button.rect.x + self.upgrade_button.rect.width // 2 - tooltip_width // 2
-        tooltip_y = self.upgrade_button.rect.y - tooltip_height - 5
+        tooltip_x = self.upgrade_button.rect.centerx - tooltip_width // 2
+        tooltip_y = self.upgrade_button.rect.y - tooltip_height - 5 # 5px spacing
         
-        # Make sure tooltip stays within screen bounds
-        if tooltip_x < 10:
-            tooltip_x = 10
-        if tooltip_y < 10:
-            tooltip_y = self.upgrade_button.rect.y + self.upgrade_button.rect.height + 5
+        # Make sure tooltip stays within screen bounds (simple adjustment)
+        # A more robust solution might involve checking against UIManager.screen_width/height
+        if tooltip_x < 5: # Small padding from edge
+            tooltip_x = 5
+        if tooltip_y < 5:
+            tooltip_y = self.upgrade_button.rect.bottom + 5
+        if tooltip_x + tooltip_width > surface.get_width() - 5: # surface is passed in render_tooltip
+             tooltip_x = surface.get_width() - tooltip_width - 5
         
-        # Create tooltip data
         tooltip_rect = pygame.Rect(tooltip_x, tooltip_y, tooltip_width, tooltip_height)
         
         return {
             "rect": tooltip_rect,
             "lines": tooltip_lines,
+            "font": tooltip_font, # Pass the font to render_tooltip
             "line_height": line_height,
             "padding": padding
         }
-    
+
     def render_tooltip(self, surface):
         """Render the tooltip if it's active"""
         if not self.tooltip_data:
             return
-            
-        # Extract tooltip data
+
         tooltip_rect = self.tooltip_data["rect"]
         tooltip_lines = self.tooltip_data["lines"]
+        tooltip_font = self.tooltip_data["font"] # Use the font from tooltip_data
         line_height = self.tooltip_data["line_height"]
         padding = self.tooltip_data["padding"]
-        
+
+        # Adjust position again just before rendering, in case screen size changed
+        # This is a simplified check; ideally, UIManager would pass screen dimensions
+        if tooltip_rect.right > surface.get_width() - 5:
+            tooltip_rect.right = surface.get_width() - 5
+        if tooltip_rect.left < 5:
+            tooltip_rect.left = 5
+        if tooltip_rect.bottom > surface.get_height() - 5:
+            tooltip_rect.bottom = surface.get_height() -5
+        if tooltip_rect.top < 5:
+            tooltip_rect.top = 5
+
         # Draw tooltip background
-        pygame.draw.rect(surface, (50, 50, 70), tooltip_rect)
-        pygame.draw.rect(surface, (100, 100, 150), tooltip_rect, 2)  # Border
-        
+        pygame.draw.rect(surface, (40, 40, 60), tooltip_rect) # Darker background
+        pygame.draw.rect(surface, (120, 120, 150), tooltip_rect, 1)  # Softer Border
+
         # Draw tooltip text
         for i, line in enumerate(tooltip_lines):
-            text_color = GOLD_COLOR if i == 0 else TEXT_COLOR
-            text_surface = self.font.render(line, True, text_color)
+            # Basic alternating color for section headers, can be improved
+            is_header = "Cost:" in line or "Level" in line 
+            text_color_to_use = GOLD_COLOR if is_header else TEXT_COLOR
+            
+            text_surface = tooltip_font.render(line, True, text_color_to_use)
             surface.blit(text_surface, (tooltip_rect.x + padding, tooltip_rect.y + padding + i * line_height))
-    
+
     def _wrap_text(self, text, max_width):
         """Wrap text to fit within a given width"""
         words = text.split(' ')
@@ -422,6 +481,10 @@ class BuildingPanel:
         
         self.font = pygame.font.SysFont('Arial', 14)
         self.title_font = pygame.font.SysFont('Arial', 16, bold=True)
+
+        # Tooltip state for upgrades
+        self.show_upgrade_tooltip = False
+        self.tooltip_data = None
         
         # Create buttons
         button_width = 80
@@ -462,6 +525,10 @@ class BuildingPanel:
             self.upgrade_button.enabled = False
         
         self.upgrade_button.update(mouse_pos)
+
+        # Check if mouse is hovering over upgrade button for tooltip
+        # Only show if the button is enabled (i.e., not max level and has building)
+        self.show_upgrade_tooltip = self.upgrade_button.enabled and self.upgrade_button.rect.collidepoint(mouse_pos)
         
         # Update building data
         self.building_data = self.game_state.buildings[self.building_id]
@@ -523,26 +590,26 @@ class BuildingPanel:
         count = multiplier if multiplier != -1 else 1  # Use 1 for display, 'Max' is handled differently
         
         # Ensure count is an integer for the get_building_purchase_cost method
-        purchase_count = int(count) if count != -1 else count
+        # purchase_count = int(count) if count != -1 else count # Original logic
         
-        # Draw purchase cost with current multiplier
-        cost = self.game_state.get_building_purchase_cost(self.building_id, purchase_count)
-        cost_text_parts = []
-        for resource, amount in cost.items():
-            cost_text_parts.append(f"{resource.capitalize()}: {amount:.1f}")
-        
-        # Base cost text
+        display_count_for_cost = count
         cost_prefix = "Cost: "
-        
-        # Add multiplier indicator to cost text if not x1
         if multiplier > 1:
             cost_prefix = f"Cost (x{multiplier}): "
         elif multiplier == -1:  # Max
-            max_affordable = self.game_state.calculate_max_affordable(self.game_state.get_building_purchase_cost(self.building_id, 1))
-            if max_affordable > 0:
-                cost_prefix = f"Cost (Max {max_affordable}): "
+            max_buy_count = self.game_state.calculate_max_affordable(self.game_state.get_building_purchase_cost(self.building_id, 1))
+            if max_buy_count > 0:
+                display_count_for_cost = max_buy_count
+                cost_prefix = f"Cost (Max {max_buy_count}): "
             else:
-                cost_prefix = "Cost (Max): "
+                display_count_for_cost = 1 # Show cost for 1 if cannot afford any for Max
+                cost_prefix = f"Cost (Max 0): "
+        
+        # Draw purchase cost
+        actual_cost_to_display = self.game_state.get_building_purchase_cost(self.building_id, display_count_for_cost if multiplier != -1 else (max_buy_count if max_buy_count > 0 else 1) )
+        cost_text_parts = []
+        for resource, amount in actual_cost_to_display.items():
+            cost_text_parts.append(f"{resource.capitalize()}: {amount:.1f}")
         
         cost_text = cost_prefix + ", ".join(cost_text_parts[:2])  # Show only first two resources
         if len(cost_text_parts) > 2:
@@ -561,37 +628,149 @@ class BuildingPanel:
             # Draw upgrade cost if not at max level
             # multiplier is already provided as a parameter
             
-            # Ensure count is an integer for the get_building_upgrade_cost method
-            upgrade_count = int(count) if count != -1 else count
-            
-            upgrade_cost = self.game_state.get_building_upgrade_cost(self.building_id, upgrade_count)
-            upgrade_text_parts = []
-            for resource, amount in upgrade_cost.items():
-                upgrade_text_parts.append(f"{resource.capitalize()}: {amount:.1f}")
-            
-            # Base upgrade text
+            display_count_for_upgrade = count
             upgrade_prefix = "Upgrade: "
-            
-            # Add multiplier indicator to upgrade text if not x1
+            actual_upgrade_cost_to_display = {}
+
             if multiplier > 1:
                 upgrade_prefix = f"Upgrade (x{multiplier}): "
             elif multiplier == -1:  # Max
-                max_affordable = self.game_state.calculate_max_affordable(self.game_state.get_building_upgrade_cost(self.building_id, 1))
-                if max_affordable > 0:
-                    upgrade_prefix = f"Upgrade (Max {max_affordable}): "
+                max_upgrade_count = self.game_state.calculate_max_affordable(self.game_state.get_building_upgrade_cost(self.building_id, 1))
+                if max_upgrade_count > 0:
+                    display_count_for_upgrade = max_upgrade_count
+                    upgrade_prefix = f"Upgrade (Max {max_upgrade_count}): "
                 else:
-                    upgrade_prefix = "Upgrade (Max): "
+                    display_count_for_upgrade = 1 # Show cost for 1 if cannot afford any for Max
+                    upgrade_prefix = f"Upgrade (Max 0): "
+            
+            actual_upgrade_cost_to_display = self.game_state.get_building_upgrade_cost(self.building_id, display_count_for_upgrade if multiplier != -1 else (max_upgrade_count if max_upgrade_count > 0 else 1))
+            upgrade_text_parts = []
+            for resource, amount in actual_upgrade_cost_to_display.items():
+                upgrade_text_parts.append(f"{resource.capitalize()}: {amount:.1f}")
             
             upgrade_text = upgrade_prefix + ", ".join(upgrade_text_parts[:2])
             if len(upgrade_text_parts) > 2:
                 upgrade_text += "..."
             
             # Check if player can afford the upgrade
-            can_afford_upgrade = self.game_state.can_afford(upgrade_cost)
+            # For "Max", can_afford_upgrade should be true if max_upgrade_count > 0, or based on the actual_upgrade_cost_to_display
+            can_afford_upgrade = self.game_state.can_afford(actual_upgrade_cost_to_display)
+            if multiplier == -1 and max_upgrade_count == 0 : # If Max is 0, it's not affordable
+                 can_afford_upgrade = False
+                 
             upgrade_color = GOLD_COLOR if can_afford_upgrade else (150, 120, 50)
             
             upgrade_surface = self.font.render(upgrade_text, True, upgrade_color)
             surface.blit(upgrade_surface, (self.rect.x + 120, self.rect.y + 55))
+
+        # Prepare tooltip data if hovering over upgrade button
+        if self.show_upgrade_tooltip:
+            self.tooltip_data = self._prepare_tooltip_data(surface) # Pass surface for width checking
+        else:
+            self.tooltip_data = None
+
+    def _prepare_tooltip_data(self, surface): # Added surface parameter
+        """Prepare tooltip data showing upgrade benefits for buildings"""
+        tooltip_info = self.game_state.get_building_upgrade_benefits(self.building_id)
+
+        if not tooltip_info:
+            return None
+
+        tooltip_lines = []
+
+        # Upgrade Cost (only if not max level)
+        if tooltip_info["current_level"] < tooltip_info["max_level"]:
+            cost_text_parts = []
+            if tooltip_info["upgrade_cost"]:
+                for res, amount in tooltip_info["upgrade_cost"].items():
+                    cost_text_parts.append(f"{amount:.0f} {res.capitalize()}")
+                cost_str = ", ".join(cost_text_parts) if cost_text_parts else "N/A"
+            else:
+                cost_str = "N/A" # Should not happen if not max level
+            tooltip_lines.append(f"Upgrade Cost: {cost_str}")
+            tooltip_lines.append("")  # Spacer
+
+        # Current Level Benefits
+        tooltip_lines.append(f"Current Level ({tooltip_info['current_level']}):")
+        if tooltip_info["current_benefits"]:
+            for benefit, value in tooltip_info["current_benefits"].items():
+                tooltip_lines.append(f"  - {benefit}: {value}")
+        else:
+            tooltip_lines.append("  - None")
+        tooltip_lines.append("")  # Spacer
+
+        # Next Level Benefits (only if not max level)
+        if tooltip_info["current_level"] < tooltip_info["max_level"]:
+            tooltip_lines.append(f"Next Level ({tooltip_info['next_level']}):")
+            if tooltip_info["next_level_benefits"]:
+                for benefit, value in tooltip_info["next_level_benefits"].items():
+                    tooltip_lines.append(f"  - {benefit}: {value}")
+            else:
+                tooltip_lines.append("  - No further direct benefits.")
+        else:
+            tooltip_lines.append(f"Max Level ({tooltip_info['max_level']}) Reached")
+
+
+        # Calculate tooltip dimensions (similar to RacePanel)
+        tooltip_font = pygame.font.SysFont('Arial', 12)
+        line_height = 18
+        padding = 8
+
+        max_line_width = 0
+        for line in tooltip_lines:
+            line_width = tooltip_font.size(line)[0]
+            max_line_width = max(max_line_width, line_width)
+        
+        tooltip_width = max_line_width + padding * 2
+        tooltip_height = len(tooltip_lines) * line_height + padding * 2
+        
+        tooltip_x = self.upgrade_button.rect.centerx - tooltip_width // 2
+        tooltip_y = self.upgrade_button.rect.y - tooltip_height - 5 
+        
+        if tooltip_x < 5: tooltip_x = 5
+        if tooltip_y < 5: tooltip_y = self.upgrade_button.rect.bottom + 5
+        if surface and tooltip_x + tooltip_width > surface.get_width() - 5:
+             tooltip_x = surface.get_width() - tooltip_width - 5
+        
+        tooltip_rect = pygame.Rect(tooltip_x, tooltip_y, tooltip_width, tooltip_height)
+        
+        return {
+            "rect": tooltip_rect,
+            "lines": tooltip_lines,
+            "font": tooltip_font,
+            "line_height": line_height,
+            "padding": padding
+        }
+
+    def render_tooltip(self, surface):
+        """Render the tooltip if it's active (similar to RacePanel)"""
+        if not self.tooltip_data:
+            return
+
+        tooltip_rect = self.tooltip_data["rect"]
+        tooltip_lines = self.tooltip_data["lines"]
+        tooltip_font = self.tooltip_data["font"]
+        line_height = self.tooltip_data["line_height"]
+        padding = self.tooltip_data["padding"]
+
+        # Final position adjustment before drawing
+        if tooltip_rect.right > surface.get_width() - 5:
+            tooltip_rect.right = surface.get_width() - 5
+        if tooltip_rect.left < 5:
+            tooltip_rect.left = 5
+        if tooltip_rect.bottom > surface.get_height() - 5: # Prevent going off bottom
+            tooltip_rect.bottom = surface.get_height() - 5
+        if tooltip_rect.top < 5: # Prevent going off top
+            tooltip_rect.top = 5
+            
+        pygame.draw.rect(surface, (40, 40, 60), tooltip_rect) 
+        pygame.draw.rect(surface, (120, 120, 150), tooltip_rect, 1)
+
+        for i, line in enumerate(tooltip_lines):
+            is_header = "Cost:" in line or "Level" in line or "Max Level" in line
+            text_color_to_use = GOLD_COLOR if is_header else TEXT_COLOR
+            text_surface = tooltip_font.render(line, True, text_color_to_use)
+            surface.blit(text_surface, (tooltip_rect.x + padding, tooltip_rect.y + padding + i * line_height))
 
 
 class ResearchPanel:
@@ -605,6 +784,10 @@ class ResearchPanel:
         
         self.font = pygame.font.SysFont('Arial', 14)
         self.title_font = pygame.font.SysFont('Arial', 16, bold=True)
+
+        # Tooltip state for research button
+        self.show_tooltip = False
+        self.tooltip_data = None
         
         # Create research button
         button_width = 80
@@ -628,6 +811,9 @@ class ResearchPanel:
         # Update button states based on affordability and max level
         self.research_button.enabled = can_afford and not at_max_level
         self.research_button.update(mouse_pos)
+
+        # Check if mouse is hovering over research button for tooltip
+        self.show_tooltip = self.research_button.enabled and self.research_button.rect.collidepoint(mouse_pos)
         
         # Update research data
         self.research_data = self.game_state.research[self.research_id]
@@ -703,19 +889,32 @@ class ResearchPanel:
         cost_prefix = "Cost: "
         
         # Add multiplier indicator to cost text if not x1
+        actual_cost_to_display = cost # Default to cost for 'count' or 1
         if multiplier > 1:
             cost_prefix = f"Cost (x{multiplier}): "
         elif multiplier == -1:  # Max
-            max_affordable = self.game_state.calculate_max_affordable(self.game_state.get_research_cost(self.research_id, 1))
-            if max_affordable > 0:
-                cost_prefix = f"Cost (Max {max_affordable}): "
+            max_affordable_levels = self.game_state.calculate_max_affordable_levels(
+                self.research_id, 
+                'get_research_cost', 
+                self.research_data['level'], 
+                self.research_info['max_level']
+            )
+            if max_affordable_levels > 0:
+                actual_cost_to_display = self.game_state.get_research_cost(self.research_id, count=max_affordable_levels)
+                cost_prefix = f"Cost (Max {max_affordable_levels}): "
             else:
-                cost_prefix = "Cost (Max): "
+                # Show cost for 1 level if cannot afford any for Max
+                actual_cost_to_display = self.game_state.get_research_cost(self.research_id, count=1) 
+                cost_prefix = f"Cost (Max 0): "
         
+        cost_text_parts = [] # Re-calculate parts based on actual_cost_to_display
+        for resource, amount in actual_cost_to_display.items():
+            cost_text_parts.append(f"{resource.capitalize()}: {amount:.1f}")
         cost_text = cost_prefix + ", ".join(cost_text_parts)
         
-        # Check if player can afford the research
-        can_afford = self.game_state.can_afford(cost)
+        # Check if player can afford the displayed cost
+        can_afford = self.game_state.can_afford(actual_cost_to_display)
+        
         cost_color = GOLD_COLOR if can_afford else (150, 120, 50)
         
         cost_surface = self.font.render(cost_text, True, cost_color)
@@ -727,6 +926,113 @@ class ResearchPanel:
         else:
             max_level_text = self.font.render("Maximum Level Reached", True, (0, 200, 0))
             surface.blit(max_level_text, (self.rect.x + 10, self.rect.y + self.rect.height - 25))
+            
+        # Prepare tooltip data if hovering over research button
+        if self.show_tooltip:
+            self.tooltip_data = self._prepare_tooltip_data(surface)
+        else:
+            self.tooltip_data = None
+
+    def _prepare_tooltip_data(self, surface):
+        """Prepare tooltip data showing research benefits"""
+        tooltip_info = self.game_state.get_research_upgrade_benefits(self.research_id)
+
+        if not tooltip_info:
+            return None
+
+        tooltip_lines = []
+
+        # Research Cost (only if not max level)
+        if tooltip_info["current_level"] < tooltip_info["max_level"]:
+            cost_text_parts = []
+            if tooltip_info["research_cost"]:
+                for res, amount in tooltip_info["research_cost"].items():
+                    cost_text_parts.append(f"{amount:.0f} {res.capitalize()}")
+                cost_str = ", ".join(cost_text_parts) if cost_text_parts else "N/A"
+            else: # Should not happen if not max level
+                cost_str = "N/A" 
+            tooltip_lines.append(f"Research Cost: {cost_str}")
+            tooltip_lines.append("")  # Spacer
+
+        # Current Level Effects
+        tooltip_lines.append(f"Current Level ({tooltip_info['current_level']}):")
+        if tooltip_info["current_effects"]:
+            for effect, value in tooltip_info["current_effects"].items():
+                tooltip_lines.append(f"  - {effect}: {value}")
+        else:
+            tooltip_lines.append("  - None or Inactive")
+        tooltip_lines.append("")  # Spacer
+
+        # Next Level Effects (only if not max level)
+        if tooltip_info["current_level"] < tooltip_info["max_level"]:
+            tooltip_lines.append(f"Next Level ({tooltip_info['next_level']}):")
+            if tooltip_info["next_level_effects"]:
+                for effect, value in tooltip_info["next_level_effects"].items():
+                    tooltip_lines.append(f"  - {effect}: {value}")
+            else:
+                tooltip_lines.append("  - No further direct effects.")
+        else:
+            tooltip_lines.append(f"Max Level ({tooltip_info['max_level']}) Reached")
+
+        # Calculate tooltip dimensions (similar to BuildingPanel)
+        tooltip_font = pygame.font.SysFont('Arial', 12)
+        line_height = 18
+        padding = 8
+
+        max_line_width = 0
+        for line in tooltip_lines:
+            line_width = tooltip_font.size(line)[0]
+            max_line_width = max(max_line_width, line_width)
+        
+        tooltip_width = max_line_width + padding * 2
+        tooltip_height = len(tooltip_lines) * line_height + padding * 2
+        
+        tooltip_x = self.research_button.rect.centerx - tooltip_width // 2
+        tooltip_y = self.research_button.rect.y - tooltip_height - 5
+        
+        if tooltip_x < 5: tooltip_x = 5
+        if tooltip_y < 5: tooltip_y = self.research_button.rect.bottom + 5
+        if surface and tooltip_x + tooltip_width > surface.get_width() - 5:
+             tooltip_x = surface.get_width() - tooltip_width - 5
+        
+        tooltip_rect = pygame.Rect(tooltip_x, tooltip_y, tooltip_width, tooltip_height)
+        
+        return {
+            "rect": tooltip_rect,
+            "lines": tooltip_lines,
+            "font": tooltip_font,
+            "line_height": line_height,
+            "padding": padding
+        }
+
+    def render_tooltip(self, surface):
+        """Render the tooltip if it's active (similar to BuildingPanel)"""
+        if not self.tooltip_data:
+            return
+
+        tooltip_rect = self.tooltip_data["rect"]
+        tooltip_lines = self.tooltip_data["lines"]
+        tooltip_font = self.tooltip_data["font"]
+        line_height = self.tooltip_data["line_height"]
+        padding = self.tooltip_data["padding"]
+
+        if tooltip_rect.right > surface.get_width() - 5:
+            tooltip_rect.right = surface.get_width() - 5
+        if tooltip_rect.left < 5:
+            tooltip_rect.left = 5
+        if tooltip_rect.bottom > surface.get_height() - 5:
+            tooltip_rect.bottom = surface.get_height() - 5
+        if tooltip_rect.top < 5:
+            tooltip_rect.top = 5
+            
+        pygame.draw.rect(surface, (40, 40, 60), tooltip_rect) 
+        pygame.draw.rect(surface, (120, 120, 150), tooltip_rect, 1)
+
+        for i, line in enumerate(tooltip_lines):
+            is_header = "Cost:" in line or "Level" in line or "Max Level" in line
+            text_color_to_use = GOLD_COLOR if is_header else TEXT_COLOR
+            text_surface = tooltip_font.render(line, True, text_color_to_use)
+            surface.blit(text_surface, (tooltip_rect.x + padding, tooltip_rect.y + padding + i * line_height))
 
 
 class PrestigePanel:
@@ -831,19 +1137,29 @@ class PrestigePanel:
         cost_prefix = "Cost: "
         
         # Add multiplier indicator to cost text if not x1
+        actual_cost_to_display = cost # Default to cost for 'count' or 1
         if multiplier > 1:
             cost_prefix = f"Cost (x{multiplier}): "
         elif multiplier == -1:  # Max
-            max_affordable = self.game_state.calculate_max_affordable(self.game_state.get_prestige_upgrade_cost(self.upgrade_id, 1))
-            if max_affordable > 0:
-                cost_prefix = f"Cost (Max {max_affordable}): "
+            max_affordable_levels = self.game_state.calculate_max_affordable_levels(
+                self.upgrade_id,
+                'get_prestige_upgrade_cost',
+                self.upgrade_data['level'],
+                self.upgrade_info['max_level']
+            )
+            if max_affordable_levels > 0:
+                actual_cost_to_display = self.game_state.get_prestige_upgrade_cost(self.upgrade_id, count=max_affordable_levels)
+                cost_prefix = f"Cost (Max {max_affordable_levels}): "
             else:
-                cost_prefix = "Cost (Max): "
+                # Show cost for 1 level if cannot afford any for Max
+                actual_cost_to_display = self.game_state.get_prestige_upgrade_cost(self.upgrade_id, count=1)
+                cost_prefix = f"Cost (Max 0): "
         
-        cost_text = f"{cost_prefix}{cost.get('prestige_points', 0)} prestige points"
+        cost_text = f"{cost_prefix}{actual_cost_to_display.get('prestige_points', 0)} prestige points"
         
-        # Check if player can afford the upgrade
-        can_afford = self.game_state.can_afford(cost)
+        # Check if player can afford the displayed cost
+        can_afford = self.game_state.can_afford(actual_cost_to_display)
+        
         cost_color = GOLD_COLOR if can_afford else (150, 120, 50)
         
         cost_surface = self.font.render(cost_text, True, cost_color)
@@ -971,17 +1287,31 @@ class NotificationPanel:
                 alpha = 255 * (1 - (time_elapsed - (self.notification_lifetime - 1000)) / 1000)
             
             # Draw notification text with appropriate alpha
-            if "text" in notification:
-                notification_text = notification["text"]
-            else:
-                notification_text = "New notification"
+            raw_text = notification.get("text", "New notification")
+            notification_type = notification.get("type", "info") # Default to 'info'
+            
+            # Get prefix and base color based on type
+            prefix = NOTIFICATION_PREFIXES.get(notification_type, NOTIFICATION_PREFIXES["default"])
+            base_text_color = DEFAULT_NOTIFICATION_COLOR # Default color
+            if notification_type == "achievement":
+                base_text_color = NOTIFICATION_COLOR_ACHIEVEMENT
+            elif notification_type == "unlock":
+                base_text_color = NOTIFICATION_COLOR_UNLOCK
+            elif notification_type == "error":
+                base_text_color = NOTIFICATION_COLOR_ERROR
+            elif notification_type == "save":
+                base_text_color = NOTIFICATION_COLOR_SAVE
+            elif notification_type == "info": # Explicitly set info color
+                base_text_color = NOTIFICATION_COLOR_INFO
+
+            notification_text_with_prefix = prefix + raw_text
                 
-            # Determine text color - highlight on hover
-            text_color = TEXT_COLOR
+            # Determine final text color - highlight on hover overrides type color
+            final_text_color = base_text_color
             if notification.get("id") == self.hovered_notification:
-                text_color = (255, 215, 0)  # Gold color for hover state
+                final_text_color = GOLD_COLOR  # Gold color for hover state (already defined)
                 
-            notification_surface = self.font.render(notification_text, True, text_color)
+            notification_surface = self.font.render(notification_text_with_prefix, True, final_text_color)
             notification_surface.set_alpha(int(alpha))
             
             y_pos = self.rect.y + 30 + (i * 22)
