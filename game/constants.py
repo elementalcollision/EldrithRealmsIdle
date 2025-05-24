@@ -16,23 +16,46 @@ RED_COLOR = (200, 0, 0)  # Red for negative effects
 PURPLE_COLOR = (128, 0, 128)  # Purple for prestige/special items
 BLUE_COLOR = (0, 128, 255)  # Blue for research
 
+# Notification Colors & Prefixes
+NOTIFICATION_COLOR_ACHIEVEMENT = GOLD_COLOR
+NOTIFICATION_COLOR_UNLOCK = (0, 200, 200)  # Teal
+NOTIFICATION_COLOR_ERROR = RED_COLOR
+NOTIFICATION_COLOR_INFO = (200, 200, 200)  # Light Gray
+NOTIFICATION_COLOR_SAVE = GREEN_COLOR
+DEFAULT_NOTIFICATION_COLOR = NOTIFICATION_COLOR_INFO
+
+NOTIFICATION_PREFIXES = {
+    "achievement": "[A] ",
+    "unlock": "[U] ",
+    "error": "[!] ",
+    "info": "[i] ",
+    "save": "[S] ",
+    "default": "" 
+}
+
+# Disabled Button Colors
+DISABLED_BUTTON_COLOR = (50, 50, 50)
+DISABLED_TEXT_COLOR = (150, 150, 150)
+DISABLED_BUTTON_BORDER_COLOR = (80, 80, 80)
+
+
 # Game balance constants
-BASE_INCOME_RATE = 1.0
+BASE_INCOME_RATE = 5.0
 UPGRADE_MULTIPLIER = 1.5
 BASE_UPGRADE_COST = 10
 COST_INCREASE_RATE = 1.2
 
 # Long-term progression constants
-PRESTIGE_REQUIREMENT_BASE = 1000000  # Base amount needed for first prestige
-PRESTIGE_SCALING = 5.0  # Each prestige requires this many times more resources
-PRESTIGE_BONUS_BASE = 0.1  # Each prestige gives this much bonus to all production
-RESEARCH_POINT_BASE_COST = 5000  # Base cost for research points
-RESEARCH_POINT_COST_SCALING = 1.5  # Cost scaling for research points
+PRESTIGE_REQUIREMENT_BASE = 1000000
+PRESTIGE_SCALING = 5.0
+PRESTIGE_BONUS_BASE = 0.15
+RESEARCH_POINT_BASE_COST = 5000
+RESEARCH_POINT_COST_SCALING = 1.5
 
 # Time-based mechanics
-OFFLINE_PROGRESS_RATE = 0.5  # Rate at which resources accumulate when offline (50%)
-TIME_WARP_DURATION = 3600  # Duration of time warp in seconds (1 hour)
-TIME_WARP_COOLDOWN = 86400  # Cooldown between time warps (24 hours)
+OFFLINE_PROGRESS_RATE = 0.5
+TIME_WARP_DURATION = 3600
+TIME_WARP_COOLDOWN = 86400
 
 # Resource types
 RESOURCE_TYPES = ["gold", "wood", "stone", "food", "mana", "crystal", "ancient_knowledge", "prestige_points"]
@@ -106,7 +129,7 @@ RACES = {
         "name": "Goblins",
         "description": "Crafty and numerous. Cheaper to recruit but less efficient.",
         "base_cost": 20,
-        "resource_bonuses": {},
+        "resource_bonuses": {"gold": 1.05},
         "unlock_level": 2,
         "special_abilities": {
             "horde_tactics": {
@@ -403,7 +426,7 @@ RESEARCH = {
         "effect": {"resource_multiplier": {"stone": 1.1, "gold": 1.1}},
         "max_level": 100,
         "cost_scaling": 1.5,
-        "effect_scaling": 1.1,  # Each level adds another 10% to the multiplier
+        "effect_scaling": 1.1,
         "unlock_level": 10
     },
     "advanced_forestry": {
@@ -440,7 +463,7 @@ RESEARCH = {
         "name": "Racial Harmony",
         "description": "Improves production bonuses from all races.",
         "cost": {"ancient_knowledge": 50},
-        "effect": {"race_bonus_multiplier": 1.1},  # 10% increase to all race bonuses
+        "effect": {"race_bonus_multiplier": 1.1},
         "max_level": 50,
         "cost_scaling": 1.8,
         "effect_scaling": 1.05,
@@ -461,7 +484,7 @@ RESEARCH = {
         "name": "Time Manipulation",
         "description": "Bends the laws of time to increase all production.",
         "cost": {"ancient_knowledge": 200, "crystal": 50},
-        "effect": {"global_multiplier": 1.05},  # 5% to all production
+        "effect": {"global_multiplier": 1.05},
         "max_level": 20,
         "cost_scaling": 2.5,
         "effect_scaling": 1.05,
@@ -472,7 +495,7 @@ RESEARCH = {
         "name": "Cosmic Awareness",
         "description": "Expands consciousness to understand the universe, massively boosting all production.",
         "cost": {"ancient_knowledge": 1000, "crystal": 200},
-        "effect": {"global_multiplier": 1.2},  # 20% to all production
+        "effect": {"global_multiplier": 1.2},
         "max_level": 10,
         "cost_scaling": 3.0,
         "effect_scaling": 1.2,
@@ -483,7 +506,7 @@ RESEARCH = {
         "name": "Reality Manipulation",
         "description": "Allows direct manipulation of reality itself, creating resources from nothing.",
         "cost": {"ancient_knowledge": 5000, "crystal": 1000},
-        "effect": {"idle_resource_generation": 10.0},  # Flat bonus to all resource generation
+        "effect": {"idle_resource_generation": 10.0},
         "max_level": 5,
         "cost_scaling": 5.0,
         "effect_scaling": 2.0,
@@ -500,7 +523,7 @@ PRESTIGE_UPGRADES = {
         "cost": {"prestige_points": 1},
         "effect": {"knowledge_retention": 0.1},
         "max_level": 5,
-        "effect_scaling": 1.0  # Additive: 10%, 20%, 30%, etc.
+        "effect_scaling": 1.0
     },
     "faster_start": {
         "name": "Faster Start",
@@ -508,39 +531,39 @@ PRESTIGE_UPGRADES = {
         "cost": {"prestige_points": 1},
         "effect": {"starting_gold": 1000},
         "max_level": 10,
-        "effect_scaling": 2.0  # 1000, 2000, 4000, etc.
+        "effect_scaling": 2.0
     },
     "resource_memory": {
         "name": "Resource Memory",
         "description": "Retain 5% of your basic resources after prestige.",
         "cost": {"prestige_points": 2},
-        "effect": {"resource_retention": 0.05},
+        "effect": {"resource_retention": 0.08},
         "max_level": 5,
-        "effect_scaling": 1.0  # Additive: 5%, 10%, 15%, etc.
+        "effect_scaling": 1.0
     },
     "automatic_production": {
         "name": "Automatic Production",
         "description": "Automatically generate resources even when game is closed.",
         "cost": {"prestige_points": 3},
-        "effect": {"offline_progress": 0.2},  # 20% of normal production when offline
+        "effect": {"offline_progress": 0.2},
         "max_level": 5,
-        "effect_scaling": 1.0  # Additive: 20%, 40%, 60%, etc.
+        "effect_scaling": 1.0
     },
     "time_warp": {
         "name": "Time Warp",
         "description": "Ability to accelerate time for 1 hour, once per day.",
         "cost": {"prestige_points": 5},
-        "effect": {"time_warp_multiplier": 2.0},  # Production is 2x during time warp
+        "effect": {"time_warp_multiplier": 2.0},
         "max_level": 5,
-        "effect_scaling": 1.5  # 2x, 3x, 4.5x, etc.
+        "effect_scaling": 1.5
     },
     "cosmic_insight": {
         "name": "Cosmic Insight",
         "description": "Permanent boost to all production that stacks across prestiges.",
         "cost": {"prestige_points": 10},
-        "effect": {"permanent_multiplier": 1.1},  # 10% permanent boost
+        "effect": {"permanent_multiplier": 1.1},
         "max_level": 10,
-        "effect_scaling": 1.0  # Each level adds another 10%
+        "effect_scaling": 1.0
     }
 }
 
@@ -563,58 +586,40 @@ ACHIEVEMENTS = {
         {"id": "celestial_1", "name": "Star Touched", "description": "Recruit your first Celestial", "requirement": {"race": "celestial", "count": 1}, "reward": {"mana_multiplier": 1.2}}
     ],
     "race_skill_milestones": [
-        # Dwarf Mining Skill Achievements
         {"id": "dwarf_mining_1", "name": "Novice Miner", "description": "Generate 10,000 stone with Dwarves", "requirement": {"race_skill": "dwarf", "resource": "stone", "amount": 10000}, "reward": {"stone_multiplier": 1.05, "dwarf_stone_bonus": 1.1}},
         {"id": "dwarf_mining_2", "name": "Adept Miner", "description": "Generate 1,000,000 stone with Dwarves", "requirement": {"race_skill": "dwarf", "resource": "stone", "amount": 1000000}, "reward": {"stone_multiplier": 1.1, "dwarf_stone_bonus": 1.2}},
         {"id": "dwarf_mining_3", "name": "Master Miner", "description": "Generate 100,000,000 stone with Dwarves", "requirement": {"race_skill": "dwarf", "resource": "stone", "amount": 100000000}, "reward": {"stone_multiplier": 1.15, "dwarf_stone_bonus": 1.3}},
         {"id": "dwarf_mining_4", "name": "Legendary Miner", "description": "Generate 10,000,000,000 stone with Dwarves", "requirement": {"race_skill": "dwarf", "resource": "stone", "amount": 10000000000, "player_level": 50}, "reward": {"stone_multiplier": 1.2, "dwarf_stone_bonus": 1.5, "crystal_chance": 0.05}},
-        
-        # Elf Woodcutting Skill Achievements
         {"id": "elf_woodcutting_1", "name": "Novice Forester", "description": "Generate 10,000 wood with Elves", "requirement": {"race_skill": "elf", "resource": "wood", "amount": 10000}, "reward": {"wood_multiplier": 1.05, "elf_wood_bonus": 1.1}},
         {"id": "elf_woodcutting_2", "name": "Adept Forester", "description": "Generate 1,000,000 wood with Elves", "requirement": {"race_skill": "elf", "resource": "wood", "amount": 1000000}, "reward": {"wood_multiplier": 1.1, "elf_wood_bonus": 1.2}},
         {"id": "elf_woodcutting_3", "name": "Master Forester", "description": "Generate 100,000,000 wood with Elves", "requirement": {"race_skill": "elf", "resource": "wood", "amount": 100000000}, "reward": {"wood_multiplier": 1.15, "elf_wood_bonus": 1.3}},
         {"id": "elf_woodcutting_4", "name": "Legendary Forester", "description": "Generate 10,000,000,000 wood with Elves", "requirement": {"race_skill": "elf", "resource": "wood", "amount": 10000000000, "player_level": 50}, "reward": {"wood_multiplier": 1.2, "elf_wood_bonus": 1.5, "mana_regeneration": 1.1}},
-        
-        # Human Trading Skill Achievements
         {"id": "human_trading_1", "name": "Novice Trader", "description": "Generate 50,000 gold with Humans", "requirement": {"race_skill": "human", "resource": "gold", "amount": 50000}, "reward": {"gold_multiplier": 1.05, "human_gold_bonus": 1.1}},
         {"id": "human_trading_2", "name": "Adept Trader", "description": "Generate 5,000,000 gold with Humans", "requirement": {"race_skill": "human", "resource": "gold", "amount": 5000000}, "reward": {"gold_multiplier": 1.1, "human_gold_bonus": 1.2}},
         {"id": "human_trading_3", "name": "Master Trader", "description": "Generate 500,000,000 gold with Humans", "requirement": {"race_skill": "human", "resource": "gold", "amount": 500000000}, "reward": {"gold_multiplier": 1.15, "human_gold_bonus": 1.3}},
         {"id": "human_trading_4", "name": "Legendary Trader", "description": "Generate 50,000,000,000 gold with Humans", "requirement": {"race_skill": "human", "resource": "gold", "amount": 50000000000, "player_level": 50}, "reward": {"gold_multiplier": 1.2, "human_gold_bonus": 1.5, "all_resources_multiplier": 1.05}},
-        
-        # Goblin Scavenging Skill Achievements
         {"id": "goblin_scavenging_1", "name": "Novice Scavenger", "description": "Generate 20,000 food with Goblins", "requirement": {"race_skill": "goblin", "resource": "food", "amount": 20000}, "reward": {"food_multiplier": 1.05, "goblin_food_bonus": 1.1}},
         {"id": "goblin_scavenging_2", "name": "Adept Scavenger", "description": "Generate 2,000,000 food with Goblins", "requirement": {"race_skill": "goblin", "resource": "food", "amount": 2000000}, "reward": {"food_multiplier": 1.1, "goblin_food_bonus": 1.2}},
         {"id": "goblin_scavenging_3", "name": "Master Scavenger", "description": "Generate 200,000,000 food with Goblins", "requirement": {"race_skill": "goblin", "resource": "food", "amount": 200000000}, "reward": {"food_multiplier": 1.15, "goblin_food_bonus": 1.3}},
         {"id": "goblin_scavenging_4", "name": "Legendary Scavenger", "description": "Generate 20,000,000,000 food with Goblins", "requirement": {"race_skill": "goblin", "resource": "food", "amount": 20000000000, "player_level": 50}, "reward": {"food_multiplier": 1.2, "goblin_food_bonus": 1.5, "resource_conversion_rate": 1.1}},
-        
-        # Troll Strength Skill Achievements
         {"id": "troll_strength_1", "name": "Novice Crusher", "description": "Generate 30,000 stone with Trolls", "requirement": {"race_skill": "troll", "resource": "stone", "amount": 30000}, "reward": {"stone_multiplier": 1.05, "troll_stone_bonus": 1.1}},
         {"id": "troll_strength_2", "name": "Adept Crusher", "description": "Generate 3,000,000 stone with Trolls", "requirement": {"race_skill": "troll", "resource": "stone", "amount": 3000000}, "reward": {"stone_multiplier": 1.1, "troll_stone_bonus": 1.2}},
         {"id": "troll_strength_3", "name": "Master Crusher", "description": "Generate 300,000,000 stone with Trolls", "requirement": {"race_skill": "troll", "resource": "stone", "amount": 300000000}, "reward": {"stone_multiplier": 1.15, "troll_stone_bonus": 1.3}},
         {"id": "troll_strength_4", "name": "Legendary Crusher", "description": "Generate 30,000,000,000 stone with Trolls", "requirement": {"race_skill": "troll", "resource": "stone", "amount": 30000000000, "player_level": 50}, "reward": {"stone_multiplier": 1.2, "troll_stone_bonus": 1.5, "food_consumption_reduction": 0.2}},
-        
-        # Shade Magic Skill Achievements
         {"id": "shade_magic_1", "name": "Novice Channeler", "description": "Generate 10,000 mana with Shades", "requirement": {"race_skill": "shade", "resource": "mana", "amount": 10000}, "reward": {"mana_multiplier": 1.05, "shade_mana_bonus": 1.1}},
         {"id": "shade_magic_2", "name": "Adept Channeler", "description": "Generate 1,000,000 mana with Shades", "requirement": {"race_skill": "shade", "resource": "mana", "amount": 1000000}, "reward": {"mana_multiplier": 1.1, "shade_mana_bonus": 1.2}},
         {"id": "shade_magic_3", "name": "Master Channeler", "description": "Generate 100,000,000 mana with Shades", "requirement": {"race_skill": "shade", "resource": "mana", "amount": 100000000}, "reward": {"mana_multiplier": 1.15, "shade_mana_bonus": 1.3}},
         {"id": "shade_magic_4", "name": "Legendary Channeler", "description": "Generate 10,000,000,000 mana with Shades", "requirement": {"race_skill": "shade", "resource": "mana", "amount": 10000000000, "player_level": 50}, "reward": {"mana_multiplier": 1.2, "shade_mana_bonus": 1.5, "production_doubling_chance": 0.05}},
-        
-        # Time-based skill achievements (increasing difficulty)
         {"id": "time_skill_1", "name": "Skill Novice", "description": "Reach player level 20 within 2 days of playtime", "requirement": {"player_level": 20, "max_play_time": 172800}, "reward": {"all_production": 1.1}},
         {"id": "time_skill_2", "name": "Skill Adept", "description": "Reach player level 50 within 5 days of playtime", "requirement": {"player_level": 50, "max_play_time": 432000}, "reward": {"all_production": 1.2}},
         {"id": "time_skill_3", "name": "Skill Master", "description": "Reach player level 100 within 10 days of playtime", "requirement": {"player_level": 100, "max_play_time": 864000}, "reward": {"all_production": 1.3}},
         {"id": "time_skill_4", "name": "Skill Grandmaster", "description": "Reach player level 200 within 20 days of playtime", "requirement": {"player_level": 200, "max_play_time": 1728000}, "reward": {"all_production": 1.5, "prestige_point_multiplier": 1.2}},
-        
-        # Advanced race skill achievements (unlocked at high prestige)
         {"id": "deepling_knowledge_1", "name": "Abyssal Scholar", "description": "Generate 50,000 ancient knowledge with Deeplings", "requirement": {"race_skill": "deepling", "resource": "ancient_knowledge", "amount": 50000, "prestige_level": 3}, "reward": {"ancient_knowledge_multiplier": 1.1, "deepling_knowledge_bonus": 1.2}},
         {"id": "deepling_knowledge_2", "name": "Abyssal Sage", "description": "Generate 5,000,000 ancient knowledge with Deeplings", "requirement": {"race_skill": "deepling", "resource": "ancient_knowledge", "amount": 5000000, "prestige_level": 5}, "reward": {"ancient_knowledge_multiplier": 1.2, "deepling_knowledge_bonus": 1.5, "research_speed": 1.2}},
-        
         {"id": "dragon_hoard_1", "name": "Dragon Treasurer", "description": "Accumulate 1,000,000,000 gold with Dragons", "requirement": {"race_skill": "dragon", "resource": "gold", "amount": 1000000000, "prestige_level": 4}, "reward": {"gold_multiplier": 1.2, "dragon_gold_bonus": 1.3}},
         {"id": "dragon_hoard_2", "name": "Dragon Overlord", "description": "Accumulate 100,000,000,000 gold with Dragons", "requirement": {"race_skill": "dragon", "resource": "gold", "amount": 100000000000, "prestige_level": 6}, "reward": {"gold_multiplier": 1.3, "dragon_gold_bonus": 1.6, "resource_transmutation_efficiency": 1.5}},
-        
         {"id": "celestial_alignment_1", "name": "Stellar Harmonizer", "description": "Generate 1,000,000 of each resource with Celestials", "requirement": {"race_skill": "celestial", "all_resources": 1000000, "prestige_level": 5}, "reward": {"all_resources_multiplier": 1.1, "celestial_efficiency": 1.3}},
         {"id": "celestial_alignment_2", "name": "Cosmic Harmonizer", "description": "Generate 100,000,000 of each resource with Celestials", "requirement": {"race_skill": "celestial", "all_resources": 100000000, "prestige_level": 7}, "reward": {"all_resources_multiplier": 1.2, "celestial_efficiency": 1.5, "passive_prestige_generation": 0.0001}},
-        
         {"id": "void_walker_mastery_1", "name": "Dimensional Adept", "description": "Generate 10,000,000 of each resource with Void Walkers", "requirement": {"race_skill": "void_walker", "all_resources": 10000000, "prestige_level": 5}, "reward": {"all_resources_multiplier": 1.15, "void_walker_efficiency": 1.3}},
         {"id": "void_walker_mastery_2", "name": "Dimensional Master", "description": "Generate 1,000,000,000 of each resource with Void Walkers", "requirement": {"race_skill": "void_walker", "all_resources": 1000000000, "prestige_level": 7}, "reward": {"all_resources_multiplier": 1.25, "void_walker_efficiency": 1.6, "parallel_production_bonus": 0.2}}
     ],

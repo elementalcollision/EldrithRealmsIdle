@@ -53,6 +53,25 @@ class UIManager:
         # Window resize indicator
         self.show_resize_indicator = False
         self.resize_indicator_time = 0
+
+        # Save file list for load dialog
+        self.saves_dir = "saves"
+        if not os.path.exists(self.saves_dir):
+            os.makedirs(self.saves_dir, exist_ok=True)
+        
+        self.available_save_files = []
+        self.selected_save_file_index = -1 # For highlighting, not fully used yet
+        self.save_file_display_rects = []
+        self.load_dialog_scroll_offset = 0
+        self.max_save_files_display = 5 
+        self.save_file_list_item_height = 25
+        self.load_dialog_scrollbar_rect = None
+        self.load_dialog_scroll_handle_rect = None
+        self.is_dragging_scroll_handle = False
+
+        # Help Panel
+        self.show_help_panel = False
+        self.help_close_button = None # Will be created in _render_help_panel
         
     def load_race_graphics(self):
         """Load 8-bit voxel graphics for each race"""
@@ -76,62 +95,41 @@ class UIManager:
         graphics_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'assets', 'images', 'races')
         os.makedirs(graphics_dir, exist_ok=True)
         
-        # Create placeholder voxel graphics for each race
-        for race_id, color in race_colors.items():
-            # Create a surface for the race
-            surface = pygame.Surface((64, 64), pygame.SRCALPHA)
-            
-            # Draw a simple voxel-style character
-            # Head
-            pygame.draw.rect(surface, color, (16, 8, 32, 24))
-            # Eyes
-            pygame.draw.rect(surface, (255, 255, 255), (22, 16, 8, 8))
-            pygame.draw.rect(surface, (255, 255, 255), (34, 16, 8, 8))
-            pygame.draw.rect(surface, (0, 0, 0), (24, 18, 4, 4))
-            pygame.draw.rect(surface, (0, 0, 0), (36, 18, 4, 4))
-            # Body
-            pygame.draw.rect(surface, color, (20, 32, 24, 20))
-            # Arms
-            pygame.draw.rect(surface, color, (8, 32, 12, 8))
-            pygame.draw.rect(surface, color, (44, 32, 12, 8))
-            # Legs
-            pygame.draw.rect(surface, color, (20, 52, 8, 12))
-            pygame.draw.rect(surface, color, (36, 52, 8, 12))
-            
-            # Add race-specific details
-            if race_id == "dwarf":
-                # Beard
-                pygame.draw.rect(surface, (139, 69, 19), (16, 32, 32, 8))
-            elif race_id == "elf":
-                # Pointy ears
-                pygame.draw.rect(surface, color, (8, 12, 8, 8))
-                pygame.draw.rect(surface, color, (48, 12, 8, 8))
-            elif race_id == "troll":
-                # Larger body
-                pygame.draw.rect(surface, color, (16, 32, 32, 24))
-            elif race_id == "shade":
-                # Ghostly effect
-                for y in range(8, 64, 4):
-                    pygame.draw.line(surface, (200, 200, 255, 128), (16, y), (48, y), 1)
-            elif race_id == "fae":
-                # Butterfly/fairy wings
-                wing_color = (230, 190, 255, 180)  # Lighter purple with transparency
-                # Left wing
-                pygame.draw.ellipse(surface, wing_color, (0, 16, 20, 24))
-                # Right wing
-                pygame.draw.ellipse(surface, wing_color, (44, 16, 20, 24))
-                # Sparkles
-                for _ in range(5):
-                    x = random.randint(8, 56)
-                    y = random.randint(8, 56)
-                    pygame.draw.circle(surface, (255, 255, 255), (x, y), 1)
-            
-            # Save the surface to the race_graphics dictionary
-            self.race_graphics[race_id] = surface
-            
-            # Save the image to a file for future use
-            image_path = os.path.join(graphics_dir, f"{race_id}.png")
-            pygame.image.save(surface, image_path)
+        # Get the RACES dictionary from constants
+        from game.constants import RACES
+
+        base_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'assets', 'images', 'races')
+        
+        for race_id in RACES.keys():
+            image_path = os.path.join(base_path, f"{race_id}.png")
+            try:
+                loaded_image = pygame.image.load(image_path).convert_alpha()
+                # Ensure the loaded image is scaled to 64x64 if it's not already
+                if loaded_image.get_size() != (64, 64):
+                    loaded_image = pygame.transform.scale(loaded_image, (64, 64))
+                self.race_graphics[race_id] = loaded_image
+            except pygame.error as e:
+                print(f"Warning: Could not load image for race {race_id} at {image_path}. Pygame error: {e}")
+                # Create a placeholder surface
+                placeholder_surface = pygame.Surface((64, 64), pygame.SRCALPHA)
+                placeholder_surface.fill((100, 100, 100, 180)) # Semi-transparent gray
+                
+                # Render a question mark onto the placeholder
+                font = pygame.font.SysFont('Arial', 40, bold=True)
+                text_surf = font.render('?', True, (255, 0, 0)) # Red question mark
+                text_rect = text_surf.get_rect(center=(32, 32))
+                placeholder_surface.blit(text_surf, text_rect)
+                self.race_graphics[race_id] = placeholder_surface
+            except FileNotFoundError:
+                print(f"Warning: Image file not found for race {race_id} at {image_path}. Using placeholder.")
+                # Create a placeholder surface (same as above)
+                placeholder_surface = pygame.Surface((64, 64), pygame.SRCALPHA)
+                placeholder_surface.fill((100, 100, 100, 180)) 
+                font = pygame.font.SysFont('Arial', 40, bold=True)
+                text_surf = font.render('?', True, (255,0,0))
+                text_rect = text_surf.get_rect(center=(32,32))
+                placeholder_surface.blit(text_surf, text_rect)
+                self.race_graphics[race_id] = placeholder_surface
     
     def update_screen_size(self, width, height):
         """Update UI components based on new screen size"""
@@ -149,7 +147,7 @@ class UIManager:
     def init_components(self):
         # Create main panels
         self.resource_panel = Panel(
-            pygame.Rect(10, 10, self.screen_width - 20, 60),
+            pygame.Rect(10, 10, self.screen_width - 20, 100), # Increased height to 100
             PANEL_COLOR
         )
         
@@ -164,7 +162,7 @@ class UIManager:
         self.tab_buttons = {}
         tab_width = int(120 * self.scale_factor)
         tab_height = int(30 * self.scale_factor)
-        tab_y = int(120 * self.scale_factor)  # Increased from 80 to 120 to prevent overlap with level/prestige info
+        tab_y = int(125 * self.scale_factor)  # Adjusted from 120 to 125
         for i, tab in enumerate(self.tabs):
             self.tab_buttons[tab] = Button(
                 pygame.Rect(int(10 * self.scale_factor) + i * (tab_width + int(5 * self.scale_factor)), tab_y, tab_width, tab_height),
@@ -194,8 +192,10 @@ class UIManager:
         for i, resource in enumerate(visible_resources):
             if resource in self.game_state.resources:
                 self.resource_displays[resource] = ResourceDisplay(
-                    pygame.Rect(int(20 * self.scale_factor) + i * resource_width, int(20 * self.scale_factor), 
-                               resource_width - int(10 * self.scale_factor), int(40 * self.scale_factor)),
+                    pygame.Rect(int(20 * self.scale_factor) + i * resource_width, 
+                               self.resource_panel.rect.y + int(10 * self.scale_factor), # Positioned with padding from panel top
+                               resource_width - int(10 * self.scale_factor), 
+                               int(80 * self.scale_factor)), # New height for ResourceDisplay
                     resource,
                     self.game_state
                 )
@@ -218,20 +218,25 @@ class UIManager:
         
         # Create settings button with sprocket icon
         self.settings_button = Button(
-            pygame.Rect(self.screen_width - button_width - 10, 110, button_width, button_height),
+            pygame.Rect(self.screen_width - button_width - 10, int(160 * self.scale_factor), button_width, button_height), # Adjusted Y
             "⚙ Settings"
         )
         
         # Create prestige button
         self.prestige_button = Button(
-            pygame.Rect(self.screen_width - 2 * button_width - 20, 110, button_width, button_height),
+            pygame.Rect(self.screen_width - 2 * button_width - 20, int(160 * self.scale_factor), button_width, button_height), # Adjusted Y
             "Prestige"
         )
         
         # Create time warp button
         self.time_warp_button = Button(
-            pygame.Rect(self.screen_width - 3 * button_width - 30, 110, button_width, button_height),
+            pygame.Rect(self.screen_width - 3 * button_width - 30, int(160 * self.scale_factor), button_width, button_height), # Adjusted Y
             "Time Warp"
+        )
+
+        self.help_button = Button(
+            pygame.Rect(self.screen_width - 4 * button_width - 40, int(160 * self.scale_factor), button_width, button_height), # Positioned to the left of Time Warp
+            "Help"
         )
         
         # Create settings panel buttons (these will be shown in the settings panel)
@@ -254,6 +259,26 @@ class UIManager:
             pygame.Rect(0, 0, button_width, button_height),  # Position will be set when panel is shown
             "Import Save"
         )
+
+    def _populate_save_files_list(self):
+        """Scans the saves directory and populates the list of available .sav files."""
+        self.available_save_files = []
+        self.save_file_display_rects = [] # Clear old rects
+        self.load_dialog_scroll_offset = 0
+        try:
+            # Ensure saves_dir is an absolute path or correctly relative to the execution directory
+            # For robustness, construct path relative to this file's location if needed,
+            # but for now, assume "saves/" at root is fine as per os.makedirs in __init__.
+            raw_files = os.listdir(self.saves_dir)
+            self.available_save_files = sorted([f for f in raw_files if f.endswith(".sav")])
+        except FileNotFoundError:
+            print(f"Warning: Saves directory '{self.saves_dir}' not found.")
+            # self.game_state.add_notification(f"Saves directory '{self.saves_dir}' not found.", notification_type="error")
+            # Potentially create it again, though __init__ should handle it.
+            os.makedirs(self.saves_dir, exist_ok=True) # Ensure it exists if somehow deleted
+        except Exception as e:
+            print(f"Error listing save files: {e}")
+            # self.game_state.add_notification(f"Error listing save files.", notification_type="error")
         
     def create_race_panels(self):
         # Clear existing race panels
@@ -521,8 +546,9 @@ class UIManager:
                 
                 if self.load_button.is_clicked(self.mouse_pos):
                     self.show_settings_panel = False
+                    self._populate_save_files_list() # Populate the list when dialog is opened
                     self.show_load_dialog = True
-                    self.dialog_input_text = "save.json"
+                    self.dialog_input_text = "save.json" # Default or last used
                     self.dialog_cursor_pos = len(self.dialog_input_text)
                     return
                     
@@ -566,6 +592,24 @@ class UIManager:
             # Handle time warp button
             if self.time_warp_button.is_clicked(self.mouse_pos):
                 self.game_state.activate_time_warp()
+
+            # Handle help button
+            if self.help_button.is_clicked(self.mouse_pos):
+                self.show_help_panel = not self.show_help_panel
+                # If opening help panel, other popups should close
+                if self.show_help_panel:
+                    self.show_settings_panel = False
+                    self.show_save_dialog = False
+                    self.show_load_dialog = False
+                    self.show_export_dialog = False
+                    self.show_import_dialog = False
+                    self.show_notification_detail = False
+                return
+
+            # Handle help panel close button
+            if self.show_help_panel and self.help_close_button and self.help_close_button.is_clicked(self.mouse_pos):
+                self.show_help_panel = False
+                return
             
             # Handle bulk purchase button clicks
             if self.bulk_purchase_panel.x1_button.rect.collidepoint(event.pos):
@@ -701,8 +745,13 @@ class UIManager:
         self.load_button.update(self.mouse_pos)
         self.export_button.update(self.mouse_pos)
         self.import_button.update(self.mouse_pos)
+        
         self.prestige_button.update(self.mouse_pos)
         self.time_warp_button.update(self.mouse_pos)
+        self.help_button.update(self.mouse_pos) # Update help button
+
+        if self.show_help_panel and self.help_close_button:
+            self.help_close_button.update(self.mouse_pos)
         
         # Update notification panel
         self.notification_panel.update(self.mouse_pos)
@@ -830,6 +879,7 @@ class UIManager:
         self.settings_button.render(self.screen)
         self.prestige_button.render(self.screen)
         self.time_warp_button.render(self.screen)
+        self.help_button.render(self.screen) # Render help button
         
         # Render settings panel if active
         if self.show_settings_panel:
@@ -846,10 +896,13 @@ class UIManager:
             self._render_import_dialog()
         elif self.show_notification_detail:
             self.close_button_rect = self._render_notification_detail(self.screen)
+        elif self.show_help_panel:
+            self._render_help_panel() # Render help panel if active
         
         # Render player level and prestige level
         level_text = self.font.render(f"Level: {self.game_state.player_level}", True, TEXT_COLOR)
-        self.screen.blit(level_text, (20, 70))
+        # Adjusted y position to be below resource panel (panel y=10, height=100, so below 110)
+        self.screen.blit(level_text, (20, int(115 * self.scale_factor))) 
         
         # Render bulk purchase panel
         self.bulk_purchase_panel.render(self.screen)
@@ -857,9 +910,116 @@ class UIManager:
         # Render all collected tooltips in the foreground
         if self.active_tab == "races":
             for panel in self.race_panels.values():
-                if panel.tooltip_data:
+                if hasattr(panel, 'tooltip_data') and panel.tooltip_data:
                     panel.render_tooltip(self.screen)
-    
+        elif self.active_tab == "buildings":
+            for panel in self.building_panels.values():
+                if hasattr(panel, 'tooltip_data') and panel.tooltip_data:
+                    panel.render_tooltip(self.screen)
+        elif self.active_tab == "research":
+            for panel in self.research_panels.values():
+                if hasattr(panel, 'tooltip_data') and panel.tooltip_data:
+                    panel.render_tooltip(self.screen)
+
+    def _wrap_and_render_text(self, surface, text, rect, font, color):
+        """Wraps text and renders it within the given rect. Returns the y offset after rendering."""
+        words = text.split(' ')
+        lines = []
+        current_line = ""
+        line_spacing = font.get_linesize() 
+        y_offset = rect.y
+
+        for word in words:
+            test_line = current_line + word + " "
+            if font.size(test_line)[0] <= rect.width:
+                current_line = test_line
+            else:
+                lines.append(current_line)
+                current_line = word + " "
+        lines.append(current_line)
+
+        for line in lines:
+            if y_offset + line_spacing > rect.y + rect.height: # Stop if text overflows rect height
+                break
+            text_surface = font.render(line, True, color)
+            surface.blit(text_surface, (rect.x, y_offset))
+            y_offset += line_spacing
+        return y_offset # Return the y_offset for the next text block or element
+
+    def _render_help_panel(self):
+        """Renders the static help panel."""
+        panel_width = int(self.screen_width * 0.7)
+        panel_height = int(self.screen_height * 0.7)
+        panel_x = (self.screen_width - panel_width) // 2
+        panel_y = (self.screen_height - panel_height) // 2
+        
+        help_panel_rect = pygame.Rect(panel_x, panel_y, panel_width, panel_height)
+        
+        # Draw semi-transparent overlay for background
+        overlay = pygame.Surface((self.screen_width, self.screen_height), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 180)) 
+        self.screen.blit(overlay, (0,0))
+
+        # Draw panel background
+        pygame.draw.rect(self.screen, PANEL_COLOR, help_panel_rect)
+        pygame.draw.rect(self.screen, (150, 150, 170), help_panel_rect, 2)  # Border
+
+        # Title
+        title_surface = self.title_font.render("Eldrith Realms - Help", True, TEXT_COLOR)
+        title_rect = title_surface.get_rect(centerx=help_panel_rect.centerx, y=help_panel_rect.top + 20)
+        self.screen.blit(title_surface, title_rect)
+
+        # Close button
+        close_button_width = 80
+        close_button_height = 30
+        close_button_x = help_panel_rect.right - close_button_width - 20
+        close_button_y = help_panel_rect.top + 15 # Near top-right corner
+        
+        if self.help_close_button is None: # Create if not exists
+            self.help_close_button = Button(
+                pygame.Rect(close_button_x, close_button_y, close_button_width, close_button_height),
+                "Close"
+            )
+        else: # Ensure position is updated if screen resizes etc. (though help panel itself might not resize dynamically here)
+             self.help_close_button.rect.topleft = (close_button_x, close_button_y)
+        
+        self.help_close_button.render(self.screen)
+
+        # Content Area
+        content_padding = 40
+        content_x = help_panel_rect.left + content_padding
+        content_y_start = title_rect.bottom + 20
+        content_width = help_panel_rect.width - (2 * content_padding)
+        content_height = help_panel_rect.bottom - content_y_start - content_padding - 40 # Space for close button if at bottom
+
+        current_y = content_y_start
+        
+        help_sections = [
+            ("Goal", "The main goal is to gather resources, unlock new races, buildings, and research to grow your realm. Eventually, you can Prestige to gain powerful long-term bonuses and start anew with greater potential."),
+            ("Resources", "Key resources include Gold, Wood, Stone, Food, Mana, Crystal, and Ancient Knowledge. Each is used for different purchases and upgrades."),
+            ("Races", "Races are your primary workforce. Each race has unique bonuses and generates resources. Buy more and upgrade their levels to increase production."),
+            ("Buildings", "Buildings enhance resource production or provide global bonuses. Upgrade them to improve their effects."),
+            ("Research", "Research unlocks new abilities, improves efficiency, or provides powerful multipliers. Research costs Ancient Knowledge and sometimes other resources."),
+            ("Prestige", "When you've made significant progress (based on total earnings), you can Prestige. This resets most of your game (races, buildings, resources) but grants Prestige Points to spend on permanent powerful upgrades."),
+            ("Controls", "Use the tabs (Races, Buildings, etc.) to navigate. Use the x1, x10, x100, Max buttons to change purchase quantities. Click 'Settings' for Save/Load options.")
+        ]
+
+        section_font = pygame.font.SysFont('Arial', 16, bold=True)
+        text_font = self.font # Use the default UIManager font for body text
+
+        for i, (title, text) in enumerate(help_sections):
+            if current_y >= help_panel_rect.bottom - content_padding - 20 : break # Stop if no space
+
+            # Section Title
+            title_surf = section_font.render(title, True, GOLD_COLOR)
+            self.screen.blit(title_surf, (content_x, current_y))
+            current_y += section_font.get_linesize() + 5 # Space after title
+
+            # Section Text
+            text_rect = pygame.Rect(content_x, current_y, content_width, content_height - (current_y - content_y_start) )
+            current_y = self._wrap_and_render_text(self.screen, text, text_rect, text_font, TEXT_COLOR)
+            current_y += 15 # Space between sections
+            
     def _render_achievement_list(self):
         """Render a list of unlocked achievements with their descriptions"""
         # Define display area
@@ -941,7 +1101,8 @@ class UIManager:
             current_y += section_spacing
         
         prestige_text = self.font.render(f"Prestige: {self.game_state.prestige_count}", True, PURPLE_COLOR)
-        self.screen.blit(prestige_text, (120, 70))
+        # Adjusted y position to be below resource panel
+        self.screen.blit(prestige_text, (120, int(115 * self.scale_factor))) 
     
     def _handle_text_input(self, event, multiline=False):
         """Handle text input for dialogs"""
@@ -1073,26 +1234,38 @@ class UIManager:
         input_rect = pygame.Rect(dialog_x + 20, dialog_y + 90, dialog_width - 40, 30)
         if input_rect.collidepoint(self.mouse_pos):
             # Set cursor position based on click position
+            # This logic is simplified; a real text input would be more complex
             input_text_width = self.font.size(self.dialog_input_text)[0]
             click_offset = self.mouse_pos[0] - (input_rect.x + 5)
             if click_offset > input_text_width:
                 self.dialog_cursor_pos = len(self.dialog_input_text)
             else:
-                # Find closest character position
                 for i in range(len(self.dialog_input_text) + 1):
                     if self.font.size(self.dialog_input_text[:i])[0] >= click_offset:
                         self.dialog_cursor_pos = i
                         break
             return
-        
-        # Check load button
-        load_button_rect = pygame.Rect(dialog_x + 80, dialog_y + 140, 100, 30)
+
+        # Check for clicks on save file list items
+        for i, item_rect in enumerate(self.save_file_display_rects):
+            if item_rect.collidepoint(self.mouse_pos):
+                actual_file_index = self.load_dialog_scroll_offset + i
+                if 0 <= actual_file_index < len(self.available_save_files):
+                    selected_filename = self.available_save_files[actual_file_index]
+                    self.dialog_input_text = selected_filename
+                    self.dialog_cursor_pos = len(selected_filename)
+                    # Optionally, could set self.selected_save_file_index here if needed for persistent selection highlight
+                    return # Click handled
+
+        # Buttons (position adjusted due to increased dialog height)
+        button_y_pos = dialog_y + dialog_height - 50
+        load_button_rect = pygame.Rect(dialog_x + 80, button_y_pos, 100, 30)
+        cancel_button_rect = pygame.Rect(dialog_x + 220, button_y_pos, 100, 30)
+
         if load_button_rect.collidepoint(self.mouse_pos):
             self._load_game_from_dialog()
             return
         
-        # Check cancel button
-        cancel_button_rect = pygame.Rect(dialog_x + 220, dialog_y + 140, 100, 30)
         if cancel_button_rect.collidepoint(self.mouse_pos):
             self.show_load_dialog = False
             return
@@ -1305,9 +1478,9 @@ class UIManager:
         """Render the load game dialog"""
         # Draw dialog background
         dialog_width = 400
-        dialog_height = 200
-        dialog_x = (SCREEN_WIDTH - dialog_width) // 2
-        dialog_y = (SCREEN_HEIGHT - dialog_height) // 2
+        dialog_height = 350 # Increased height for save file list
+        dialog_x = (self.screen_width - dialog_width) // 2
+        dialog_y = (self.screen_height - dialog_height) // 2
         dialog_rect = pygame.Rect(dialog_x, dialog_y, dialog_width, dialog_height)
         
         # Draw semi-transparent overlay
@@ -1344,9 +1517,44 @@ class UIManager:
                             (input_rect.x + 5 + cursor_width, input_rect.y + 5),
                             (input_rect.x + 5 + cursor_width, input_rect.y + 25), 2)
         
-        # Draw buttons
-        load_button_rect = pygame.Rect(dialog_x + 80, dialog_y + 140, 100, 30)
-        cancel_button_rect = pygame.Rect(dialog_x + 220, dialog_y + 140, 100, 30)
+        # Save file list area
+        list_area_y_offset = 130 # Below input box
+        list_area_height = self.max_save_files_display * self.save_file_list_item_height + 10 # Max 5 items + padding
+        list_area_rect = pygame.Rect(dialog_x + 20, dialog_y + list_area_y_offset, dialog_width - 40, list_area_height)
+        pygame.draw.rect(self.screen, (50, 50, 60), list_area_rect) # Slightly different background for list area
+        pygame.draw.rect(self.screen, (100, 100, 120), list_area_rect, 1) # Border for list area
+
+        self.save_file_display_rects.clear() # Clear previous rects
+
+        if not self.available_save_files:
+            no_files_text = self.font.render("No .sav files found.", True, DISABLED_TEXT_COLOR)
+            self.screen.blit(no_files_text, (list_area_rect.x + 10, list_area_rect.y + 10))
+        else:
+            start_index = self.load_dialog_scroll_offset
+            end_index = min(start_index + self.max_save_files_display, len(self.available_save_files))
+            
+            for i, index in enumerate(range(start_index, end_index)):
+                filename = self.available_save_files[index]
+                file_text_surface = self.font.render(filename, True, TEXT_COLOR)
+                
+                item_rect = pygame.Rect(
+                    list_area_rect.x + 5, 
+                    list_area_rect.y + 5 + i * self.save_file_list_item_height,
+                    list_area_rect.width - 10,
+                    self.save_file_list_item_height
+                )
+                self.save_file_display_rects.append(item_rect) # Store rect for click detection
+
+                # Highlight on hover
+                if item_rect.collidepoint(self.mouse_pos):
+                    pygame.draw.rect(self.screen, BUTTON_HOVER_COLOR, item_rect) 
+                
+                self.screen.blit(file_text_surface, (item_rect.x + 5, item_rect.y + (self.save_file_list_item_height - file_text_surface.get_height()) // 2))
+
+        # Buttons (position adjusted due to increased dialog height)
+        button_y_pos = dialog_y + dialog_height - 50
+        load_button_rect = pygame.Rect(dialog_x + 80, button_y_pos, 100, 30)
+        cancel_button_rect = pygame.Rect(dialog_x + 220, button_y_pos, 100, 30)
         
         # Highlight buttons on hover
         load_button_color = BUTTON_HOVER_COLOR if load_button_rect.collidepoint(self.mouse_pos) else BUTTON_COLOR
