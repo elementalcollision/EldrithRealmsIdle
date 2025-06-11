@@ -68,6 +68,10 @@ class UIManager:
         self.load_dialog_scrollbar_rect = None
         self.load_dialog_scroll_handle_rect = None
         self.is_dragging_scroll_handle = False
+
+        # Help Panel
+        self.show_help_panel = False
+        self.help_close_button = None # Will be created in _render_help_panel
         
     def load_race_graphics(self):
         """Load 8-bit voxel graphics for each race"""
@@ -228,6 +232,11 @@ class UIManager:
         self.time_warp_button = Button(
             pygame.Rect(self.screen_width - 3 * button_width - 30, int(160 * self.scale_factor), button_width, button_height), # Adjusted Y
             "Time Warp"
+        )
+
+        self.help_button = Button(
+            pygame.Rect(self.screen_width - 4 * button_width - 40, int(160 * self.scale_factor), button_width, button_height), # Positioned to the left of Time Warp
+            "Help"
         )
         
         # Create settings panel buttons (these will be shown in the settings panel)
@@ -583,6 +592,24 @@ class UIManager:
             # Handle time warp button
             if self.time_warp_button.is_clicked(self.mouse_pos):
                 self.game_state.activate_time_warp()
+
+            # Handle help button
+            if self.help_button.is_clicked(self.mouse_pos):
+                self.show_help_panel = not self.show_help_panel
+                # If opening help panel, other popups should close
+                if self.show_help_panel:
+                    self.show_settings_panel = False
+                    self.show_save_dialog = False
+                    self.show_load_dialog = False
+                    self.show_export_dialog = False
+                    self.show_import_dialog = False
+                    self.show_notification_detail = False
+                return
+
+            # Handle help panel close button
+            if self.show_help_panel and self.help_close_button and self.help_close_button.is_clicked(self.mouse_pos):
+                self.show_help_panel = False
+                return
             
             # Handle bulk purchase button clicks
             if self.bulk_purchase_panel.x1_button.rect.collidepoint(event.pos):
@@ -718,8 +745,13 @@ class UIManager:
         self.load_button.update(self.mouse_pos)
         self.export_button.update(self.mouse_pos)
         self.import_button.update(self.mouse_pos)
+        
         self.prestige_button.update(self.mouse_pos)
         self.time_warp_button.update(self.mouse_pos)
+        self.help_button.update(self.mouse_pos) # Update help button
+
+        if self.show_help_panel and self.help_close_button:
+            self.help_close_button.update(self.mouse_pos)
         
         # Update notification panel
         self.notification_panel.update(self.mouse_pos)
@@ -847,6 +879,7 @@ class UIManager:
         self.settings_button.render(self.screen)
         self.prestige_button.render(self.screen)
         self.time_warp_button.render(self.screen)
+        self.help_button.render(self.screen) # Render help button
         
         # Render settings panel if active
         if self.show_settings_panel:
@@ -863,6 +896,8 @@ class UIManager:
             self._render_import_dialog()
         elif self.show_notification_detail:
             self.close_button_rect = self._render_notification_detail(self.screen)
+        elif self.show_help_panel:
+            self._render_help_panel() # Render help panel if active
         
         # Render player level and prestige level
         level_text = self.font.render(f"Level: {self.game_state.player_level}", True, TEXT_COLOR)
@@ -885,7 +920,106 @@ class UIManager:
             for panel in self.research_panels.values():
                 if hasattr(panel, 'tooltip_data') and panel.tooltip_data:
                     panel.render_tooltip(self.screen)
-    
+
+    def _wrap_and_render_text(self, surface, text, rect, font, color):
+        """Wraps text and renders it within the given rect. Returns the y offset after rendering."""
+        words = text.split(' ')
+        lines = []
+        current_line = ""
+        line_spacing = font.get_linesize() 
+        y_offset = rect.y
+
+        for word in words:
+            test_line = current_line + word + " "
+            if font.size(test_line)[0] <= rect.width:
+                current_line = test_line
+            else:
+                lines.append(current_line)
+                current_line = word + " "
+        lines.append(current_line)
+
+        for line in lines:
+            if y_offset + line_spacing > rect.y + rect.height: # Stop if text overflows rect height
+                break
+            text_surface = font.render(line, True, color)
+            surface.blit(text_surface, (rect.x, y_offset))
+            y_offset += line_spacing
+        return y_offset # Return the y_offset for the next text block or element
+
+    def _render_help_panel(self):
+        """Renders the static help panel."""
+        panel_width = int(self.screen_width * 0.7)
+        panel_height = int(self.screen_height * 0.7)
+        panel_x = (self.screen_width - panel_width) // 2
+        panel_y = (self.screen_height - panel_height) // 2
+        
+        help_panel_rect = pygame.Rect(panel_x, panel_y, panel_width, panel_height)
+        
+        # Draw semi-transparent overlay for background
+        overlay = pygame.Surface((self.screen_width, self.screen_height), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 180)) 
+        self.screen.blit(overlay, (0,0))
+
+        # Draw panel background
+        pygame.draw.rect(self.screen, PANEL_COLOR, help_panel_rect)
+        pygame.draw.rect(self.screen, (150, 150, 170), help_panel_rect, 2)  # Border
+
+        # Title
+        title_surface = self.title_font.render("Eldrith Realms - Help", True, TEXT_COLOR)
+        title_rect = title_surface.get_rect(centerx=help_panel_rect.centerx, y=help_panel_rect.top + 20)
+        self.screen.blit(title_surface, title_rect)
+
+        # Close button
+        close_button_width = 80
+        close_button_height = 30
+        close_button_x = help_panel_rect.right - close_button_width - 20
+        close_button_y = help_panel_rect.top + 15 # Near top-right corner
+        
+        if self.help_close_button is None: # Create if not exists
+            self.help_close_button = Button(
+                pygame.Rect(close_button_x, close_button_y, close_button_width, close_button_height),
+                "Close"
+            )
+        else: # Ensure position is updated if screen resizes etc. (though help panel itself might not resize dynamically here)
+             self.help_close_button.rect.topleft = (close_button_x, close_button_y)
+        
+        self.help_close_button.render(self.screen)
+
+        # Content Area
+        content_padding = 40
+        content_x = help_panel_rect.left + content_padding
+        content_y_start = title_rect.bottom + 20
+        content_width = help_panel_rect.width - (2 * content_padding)
+        content_height = help_panel_rect.bottom - content_y_start - content_padding - 40 # Space for close button if at bottom
+
+        current_y = content_y_start
+        
+        help_sections = [
+            ("Goal", "The main goal is to gather resources, unlock new races, buildings, and research to grow your realm. Eventually, you can Prestige to gain powerful long-term bonuses and start anew with greater potential."),
+            ("Resources", "Key resources include Gold, Wood, Stone, Food, Mana, Crystal, and Ancient Knowledge. Each is used for different purchases and upgrades."),
+            ("Races", "Races are your primary workforce. Each race has unique bonuses and generates resources. Buy more and upgrade their levels to increase production."),
+            ("Buildings", "Buildings enhance resource production or provide global bonuses. Upgrade them to improve their effects."),
+            ("Research", "Research unlocks new abilities, improves efficiency, or provides powerful multipliers. Research costs Ancient Knowledge and sometimes other resources."),
+            ("Prestige", "When you've made significant progress (based on total earnings), you can Prestige. This resets most of your game (races, buildings, resources) but grants Prestige Points to spend on permanent powerful upgrades."),
+            ("Controls", "Use the tabs (Races, Buildings, etc.) to navigate. Use the x1, x10, x100, Max buttons to change purchase quantities. Click 'Settings' for Save/Load options.")
+        ]
+
+        section_font = pygame.font.SysFont('Arial', 16, bold=True)
+        text_font = self.font # Use the default UIManager font for body text
+
+        for i, (title, text) in enumerate(help_sections):
+            if current_y >= help_panel_rect.bottom - content_padding - 20 : break # Stop if no space
+
+            # Section Title
+            title_surf = section_font.render(title, True, GOLD_COLOR)
+            self.screen.blit(title_surf, (content_x, current_y))
+            current_y += section_font.get_linesize() + 5 # Space after title
+
+            # Section Text
+            text_rect = pygame.Rect(content_x, current_y, content_width, content_height - (current_y - content_y_start) )
+            current_y = self._wrap_and_render_text(self.screen, text, text_rect, text_font, TEXT_COLOR)
+            current_y += 15 # Space between sections
+            
     def _render_achievement_list(self):
         """Render a list of unlocked achievements with their descriptions"""
         # Define display area
@@ -1666,71 +1800,71 @@ class UIManager:
                                       import_button_rect.y + (import_button_rect.height - import_text.get_height()) // 2))
         self.screen.blit(cancel_text, (cancel_button_rect.x + (cancel_button_rect.width - cancel_text.get_width()) // 2, 
                                       cancel_button_rect.y + (cancel_button_rect.height - cancel_text.get_height()) // 2))
-def _render_notification_detail(self, surface):
-    """Render a detailed view of the selected notification"""
-    # Get the notification details
-    notification = self.current_notification
-    if not notification:
-        self.show_notification_detail = False
-        return None
+    def _render_notification_detail(self, surface):
+        """Render a detailed view of the selected notification"""
+        # Get the notification details
+        notification = self.current_notification
+        if not notification:
+            self.show_notification_detail = False
+            return None
+            
+        # Calculate dialog dimensions and position
+        dialog_width = 500
+        dialog_height = 300
+        dialog_x = (self.screen_width - dialog_width) // 2
+        dialog_y = (self.screen_height - dialog_height) // 2
         
-    # Calculate dialog dimensions and position
-    dialog_width = 500
-    dialog_height = 300
-    dialog_x = (self.screen_width - dialog_width) // 2
-    dialog_y = (self.screen_height - dialog_height) // 2
-    
-    # Draw dialog background
-    dialog_rect = pygame.Rect(dialog_x, dialog_y, dialog_width, dialog_height)
-    pygame.draw.rect(surface, PANEL_COLOR, dialog_rect)
-    pygame.draw.rect(surface, (150, 150, 170), dialog_rect, 2)  # Border
-    
-    # Draw title
-    title = notification.get("title", "Notification")
-    title_surface = self.title_font.render(title, True, TEXT_COLOR)
-    surface.blit(title_surface, (dialog_x + (dialog_width - title_surface.get_width()) // 2, dialog_y + 20))
-    
-    # Draw notification text (with wrapping)
-    text = notification.get("detail", notification.get("text", "No details available."))
-    
-    # Simple text wrapping
-    max_width = dialog_width - 40
-    lines = []
-    current_line = ""
-    
-    for word in text.split():
-        test_line = current_line + (" " if current_line else "") + word
-        if self.font.size(test_line)[0] <= max_width:
-            current_line = test_line
-        else:
+        # Draw dialog background
+        dialog_rect = pygame.Rect(dialog_x, dialog_y, dialog_width, dialog_height)
+        pygame.draw.rect(surface, PANEL_COLOR, dialog_rect)
+        pygame.draw.rect(surface, (150, 150, 170), dialog_rect, 2)  # Border
+        
+        # Draw title
+        title = notification.get("title", "Notification")
+        title_surface = self.title_font.render(title, True, TEXT_COLOR)
+        surface.blit(title_surface, (dialog_x + (dialog_width - title_surface.get_width()) // 2, dialog_y + 20))
+        
+        # Draw notification text (with wrapping)
+        text = notification.get("detail", notification.get("text", "No details available."))
+        
+        # Simple text wrapping
+        max_width = dialog_width - 40
+        lines = []
+        current_line = ""
+        
+        for word in text.split():
+            test_line = current_line + (" " if current_line else "") + word
+            if self.font.size(test_line)[0] <= max_width:
+                current_line = test_line
+            else:
+                lines.append(current_line)
+                current_line = word
+        
+        if current_line:
             lines.append(current_line)
-            current_line = word
-    
-    if current_line:
-        lines.append(current_line)
-    
-    # Draw wrapped text
-    for i, line in enumerate(lines):
-        text_surface = self.font.render(line, True, TEXT_COLOR)
-        surface.blit(text_surface, (dialog_x + 20, dialog_y + 70 + i * 25))
-    
-    # Draw close button
-    close_button_rect = pygame.Rect(dialog_x + (dialog_width - 100) // 2, dialog_y + dialog_height - 50, 100, 30)
-    close_button_color = BUTTON_HOVER_COLOR if close_button_rect.collidepoint(self.mouse_pos) else BUTTON_COLOR
-    
-    pygame.draw.rect(surface, close_button_color, close_button_rect)
-    pygame.draw.rect(surface, (150, 150, 170), close_button_rect, 1)  # Border
-    
-    # Draw button text
-    close_text = self.font.render("Close", True, TEXT_COLOR)
-    surface.blit(close_text, (close_button_rect.x + (close_button_rect.width - close_text.get_width()) // 2, 
-                             close_button_rect.y + (close_button_rect.height - close_text.get_height()) // 2))
-    
-    return close_button_rect
+        
+        # Draw wrapped text
+        for i, line in enumerate(lines):
+            text_surface = self.font.render(line, True, TEXT_COLOR)
+            surface.blit(text_surface, (dialog_x + 20, dialog_y + 70 + i * 25))
+        
+        # Draw close button
+        close_button_rect = pygame.Rect(dialog_x + (dialog_width - 100) // 2, dialog_y + dialog_height - 50, 100, 30)
+        close_button_color = BUTTON_HOVER_COLOR if close_button_rect.collidepoint(self.mouse_pos) else BUTTON_COLOR
+        
+        pygame.draw.rect(surface, close_button_color, close_button_rect)
+        pygame.draw.rect(surface, (150, 150, 170), close_button_rect, 1)  # Border
+        
+        # Draw button text
+        close_text = self.font.render("Close", True, TEXT_COLOR)
+        surface.blit(close_text, (close_button_rect.x + (close_button_rect.width - close_text.get_width()) // 2, 
+                                 close_button_rect.y + (close_button_rect.height - close_text.get_height()) // 2))
+        
+        return close_button_rect
 
-def _handle_notification_detail_click(self, mouse_pos, close_button_rect):
-    """Handle clicks in the notification detail view"""
-    if close_button_rect and close_button_rect.collidepoint(mouse_pos):
-        self.show_notification_detail = False
-        return True
-    return False
+    def _handle_notification_detail_click(self, mouse_pos, close_button_rect):
+        """Handle clicks in the notification detail view"""
+        if close_button_rect and close_button_rect.collidepoint(mouse_pos):
+            self.show_notification_detail = False
+            return True
+        return False
