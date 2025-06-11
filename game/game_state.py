@@ -448,7 +448,11 @@ class GameState:
         self.notifications.append({"text":message,"message":message,"time":pygame.time.get_ticks(),"type":notification_type,"details":details or message,"id":len(self.notifications)+1})
         if len(self.notifications)>20: self.notifications=self.notifications[-20:]
     
-    def get_notifications(self,clear=False): n_copy=self.notifications.copy(); (self.notifications:=[] if clear else None); return n_copy # type: ignore
+    def get_notifications(self, clear=False):
+        n_copy = self.notifications.copy()
+        if clear:
+            self.notifications = []
+        return n_copy  # type: ignore
     
     def save_game(self, filename="save.json", compressed=True):
         data = {k:getattr(self,k) for k in ["resources","races","buildings","research","prestige_upgrades","achievements","player_level","total_earnings","prestige_count","prestige_points","total_prestige_points","permanent_multipliers","total_play_time","time_warp_active","time_warp_end_time","time_warp_cooldown_end"]}
