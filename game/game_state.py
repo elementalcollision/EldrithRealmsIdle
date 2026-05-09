@@ -3,10 +3,9 @@ import json
 import os
 import zlib
 import base64
-import pygame 
 
-from game.constants import (RESOURCE_TYPES, RACES, BUILDINGS, RESEARCH, 
-                           PRESTIGE_UPGRADES, ACHIEVEMENTS, BASE_INCOME_RATE, 
+from game.constants import (RESOURCE_TYPES, RACES, BUILDINGS, RESEARCH,
+                           PRESTIGE_UPGRADES, ACHIEVEMENTS, BASE_INCOME_RATE,
                            PRESTIGE_REQUIREMENT_BASE, PRESTIGE_SCALING, PRESTIGE_BONUS_BASE,
                            OFFLINE_PROGRESS_RATE, TIME_WARP_DURATION, TIME_WARP_COOLDOWN)
 
@@ -444,8 +443,134 @@ class GameState:
             if lvl>0: info=RESEARCH["reality_manipulation"]; bonus+=info["effect"]["idle_resource_generation"]*(info.get("effect_scaling",1.0)**(lvl-1))
         return bonus
 
+    # ---------- Prestige ----------
+    def get_prestige_requirement(self):
+        """Total-earnings threshold required to gain at least one prestige point."""
+        return PRESTIGE_REQUIREMENT_BASE * (PRESTIGE_SCALING ** self.prestige_count)
+
+    def calculate_prestige_points(self):
+        """Prestige points the player would gain if they prestiged right now."""
+        req = self.get_prestige_requirement()
+        if self.total_earnings < req:
+            return 0
+        # Sqrt curve so doubling earnings ~= 1.4x points; classic idle pacing.
+        base = int((self.total_earnings / req) ** 0.5)
+        # Achievement bonuses
+        bonus_mult = 1.0
+        bonus_flat = 0
+        for m in ACHIEVEMENTS.get("prestige_milestones", []):
+            if self.achievements.get("prestige_milestones", {}).get(m["id"]):
+                bonus_mult *= m["reward"].get("prestige_point_multiplier", 1.0)
+                bonus_flat += m["reward"].get("prestige_point_bonus", 0)
+        return max(0, int(base * bonus_mult) + bonus_flat)
+
+    def perform_prestige(self):
+        """Reset progression in exchange for prestige points and permanent bonuses."""
+        gained = self.calculate_prestige_points()
+        if gained <= 0:
+            return False
+
+        # Compute retention from prestige upgrades before reset.
+        kn_ret = 0.0
+        if self.prestige_upgrades.get("eternal_knowledge", {}).get("level", 0) > 0:
+            lvl = self.prestige_upgrades["eternal_knowledge"]["level"]
+            kn_ret = PRESTIGE_UPGRADES["eternal_knowledge"]["effect"]["knowledge_retention"] * lvl
+        res_ret = 0.0
+        if self.prestige_upgrades.get("resource_memory", {}).get("level", 0) > 0:
+            lvl = self.prestige_upgrades["resource_memory"]["level"]
+            res_ret = PRESTIGE_UPGRADES["resource_memory"]["effect"]["resource_retention"] * lvl
+        starting_gold = 100
+        if self.prestige_upgrades.get("faster_start", {}).get("level", 0) > 0:
+            lvl = self.prestige_upgrades["faster_start"]["level"]
+            starting_gold += int(PRESTIGE_UPGRADES["faster_start"]["effect"]["starting_gold"] * lvl)
+
+        retained_knowledge = self.resources.get("ancient_knowledge", 0) * kn_ret
+        retained_basic = {
+            r: self.resources.get(r, 0) * res_ret
+            for r in ("wood", "stone", "food", "mana", "crystal")
+        }
+
+        # Award points and bump counter.
+        self.prestige_count += 1
+        self.prestige_points += gained
+        self.total_prestige_points += gained
+
+        # Reset resources.
+        self.resources = {r: 0 for r in RESOURCE_TYPES}
+        self.resources["gold"] = starting_gold
+        self.resources["ancient_knowledge"] = retained_knowledge
+        for r, amt in retained_basic.items():
+            self.resources[r] = amt
+        self.resources["prestige_points"] = self.prestige_points
+
+        # Reset progression-affected state.
+        self.total_earnings = 0
+        self.player_level = 1
+
+        for race_id, race_data_const in RACES.items():
+            self.races[race_id]["count"] = 0
+            self.races[race_id]["level"] = 1
+            self.races[race_id]["unlocked"] = race_data_const["unlock_level"] == 1 \
+                and self.prestige_count >= race_data_const.get("requires_prestige", 0)
+            self.races[race_id]["skills"] = {res: 0 for res in RESOURCE_TYPES}
+            for ab in self.races[race_id].get("abilities", {}).values():
+                ab["unlocked"] = False
+                ab["active"] = False
+
+        for b_id, b_const in BUILDINGS.items():
+            self.buildings[b_id]["count"] = 0
+            self.buildings[b_id]["level"] = 1
+            self.buildings[b_id]["unlocked"] = b_const["unlock_level"] <= 1 \
+                and self.prestige_count >= b_const.get("requires_prestige", 0)
+
+        for r_id, r_const in RESEARCH.items():
+            self.research[r_id]["level"] = 0
+            self.research[r_id]["unlocked"] = r_const["unlock_level"] <= 1 \
+                and self.prestige_count >= r_const.get("requires_prestige", 0)
+
+        self.time_warp_active = False
+        self.add_notification(
+            f"Prestiged! Gained {gained} prestige points.",
+            notification_type="achievement",
+        )
+        return True
+
+    # ---------- Time Warp ----------
+    def has_time_warp_unlocked(self):
+        return self.prestige_upgrades.get("time_warp", {}).get("level", 0) > 0
+
+    def get_time_warp_multiplier(self):
+        lvl = self.prestige_upgrades.get("time_warp", {}).get("level", 0)
+        if lvl <= 0:
+            return 1.0
+        info = PRESTIGE_UPGRADES["time_warp"]
+        base = info["effect"]["time_warp_multiplier"]
+        scaling = info.get("effect_scaling", 1.0)
+        return base * (scaling ** (lvl - 1))
+
+    def activate_time_warp(self):
+        if not self.has_time_warp_unlocked():
+            self.add_notification("Time Warp not yet unlocked (prestige upgrade).", notification_type="error")
+            return False
+        now = time.time()
+        if self.time_warp_active:
+            self.add_notification("Time Warp already active.", notification_type="error")
+            return False
+        if now < self.time_warp_cooldown_end:
+            remaining = int(self.time_warp_cooldown_end - now)
+            self.add_notification(f"Time Warp cooling down ({remaining}s left).", notification_type="error")
+            return False
+        self.time_warp_active = True
+        self.time_warp_end_time = now + TIME_WARP_DURATION
+        self.time_warp_cooldown_end = now + TIME_WARP_COOLDOWN
+        self.add_notification(
+            f"Time Warp active! {self.get_time_warp_multiplier():.1f}x for {TIME_WARP_DURATION//60} min.",
+            notification_type="achievement",
+        )
+        return True
+
     def add_notification(self, message, details=None, notification_type="info"):
-        self.notifications.append({"text":message,"message":message,"time":pygame.time.get_ticks(),"type":notification_type,"details":details or message,"id":len(self.notifications)+1})
+        self.notifications.append({"text":message,"message":message,"time":int(time.time()*1000),"type":notification_type,"details":details or message,"id":len(self.notifications)+1})
         if len(self.notifications)>20: self.notifications=self.notifications[-20:]
     
     def get_notifications(self, clear=False):
