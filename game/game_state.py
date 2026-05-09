@@ -620,8 +620,57 @@ class GameState:
     def _apply_save_data(self, data):
         for k in ["resources","races","buildings","research","prestige_upgrades","player_level","total_earnings","prestige_count","prestige_points","total_prestige_points","permanent_multipliers","total_play_time","time_warp_active","time_warp_end_time","time_warp_cooldown_end"]:
             setattr(self,k,data.get(k,getattr(self,k)))
-        for r_id,r_data in self.races.items():
-            if "skills" not in r_data: r_data["skills"]={res_t:0 for res_t in RESOURCE_TYPES}
+
+        # Save migration: backfill any race/building/research/prestige entries
+        # that were added in a newer version of the game but aren't in this
+        # save file. Without this, accessing the new keys would KeyError.
+        for race_id, race_const in RACES.items():
+            if race_id not in self.races:
+                abilities = {
+                    ab_id: {"unlocked": False, "active": False}
+                    for ab_id in race_const.get("special_abilities", {})
+                }
+                self.races[race_id] = {
+                    "count": 0,
+                    "level": 1,
+                    "unlocked": race_const["unlock_level"] == 1
+                        and self.prestige_count >= race_const.get("requires_prestige", 0),
+                    "abilities": abilities,
+                    "skills": {res: 0 for res in RESOURCE_TYPES},
+                }
+            else:
+                # Ensure new abilities on an existing race are present.
+                race_data = self.races[race_id]
+                race_data.setdefault("abilities", {})
+                for ab_id in race_const.get("special_abilities", {}):
+                    race_data["abilities"].setdefault(
+                        ab_id, {"unlocked": False, "active": False}
+                    )
+
+        for b_id, b_const in BUILDINGS.items():
+            if b_id not in self.buildings:
+                self.buildings[b_id] = {
+                    "count": 0,
+                    "level": 1,
+                    "unlocked": b_const["unlock_level"] <= 1
+                        and self.prestige_count >= b_const.get("requires_prestige", 0),
+                }
+
+        for r_id, r_const in RESEARCH.items():
+            if r_id not in self.research:
+                self.research[r_id] = {
+                    "level": 0,
+                    "unlocked": r_const["unlock_level"] <= 1
+                        and self.prestige_count >= r_const.get("requires_prestige", 0),
+                }
+
+        for u_id in PRESTIGE_UPGRADES:
+            if u_id not in self.prestige_upgrades:
+                self.prestige_upgrades[u_id] = {"level": 0}
+
+        for r_id, r_data in self.races.items():
+            if "skills" not in r_data:
+                r_data["skills"] = {res_t: 0 for res_t in RESOURCE_TYPES}
         
         def_ach_struct={c_k:{ach["id"]:False for ach in ach_l} for c_k,ach_l in ACHIEVEMENTS.items()}
         loaded_ach=data.get("achievements",{}); self.achievements=def_ach_struct.copy()
