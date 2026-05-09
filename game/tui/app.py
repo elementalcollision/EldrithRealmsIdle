@@ -14,6 +14,7 @@ from textual.widgets import Footer, Header, RichLog, Static, TabbedContent, TabP
 from game.constants import GAME_TITLE, RESOURCE_TYPES, PRESTIGE_REQUIREMENT_BASE
 from game.game_state import GameState
 from game.tui.format import short_num, format_seconds
+from game.tui.modals import WelcomeBackModal
 from game.tui.tabs import (
     AchievementsTab, BuildingsTab, GameTab, PrestigeTab, RacesTab, ResearchTab,
 )
@@ -75,6 +76,7 @@ class EldrithApp(App):
 
     CSS_PATH = "styles.tcss"
     TITLE = GAME_TITLE
+    SUB_TITLE = "An eldritch idle realm"
 
     BINDINGS = [
         Binding("1", "show_tab('races')", "Races", show=True),
@@ -125,7 +127,15 @@ class EldrithApp(App):
         self.set_interval(REFRESH_SECONDS, self._refresh_ui)
         self._drain_notifications()
         self.status.refresh_status()
-        self.log_widget.write(f"[bold cyan]{GAME_TITLE}[/bold cyan] — type [b]?[/b] for help, [b]ctrl+q[/b] to quit.")
+        self.log_widget.write(
+            f"[bold cyan]{GAME_TITLE}[/bold cyan] — keys shown in footer; "
+            "ctrl+q to save & quit."
+        )
+        # Surface offline progress, if a save was just loaded.
+        summary = getattr(self.game_state, "pending_offline_summary", None)
+        if summary:
+            self.game_state.pending_offline_summary = None
+            self.push_screen(WelcomeBackModal(summary))
 
     # ---------------- Game loop ----------------
     def _tick(self) -> None:

@@ -40,8 +40,9 @@ DataTable > .datatable--cursor {
     color: $text;
 }
 
-#tab-help {
+.tab-help {
     height: 1;
     color: $text-muted;
     padding: 0 1;
+    text-style: italic;
 }

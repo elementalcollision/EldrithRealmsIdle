@@ -87,6 +87,10 @@ class GameState:
         
         # Notifications
         self.notifications = []
+
+        # Set by load_game / import_save_string when offline progress accrued;
+        # the UI consumes and clears it on startup.
+        self.pending_offline_summary = None
     
     def update(self, elapsed_time):
         if self.time_warp_active:
@@ -626,16 +630,28 @@ class GameState:
                 for m_id,m_stat in mstones.items():
                     if m_id in self.achievements[cat]: self.achievements[cat][m_id]=m_stat
         
-        off_time=time.time()-data.get("save_time",time.time())
-        if off_time>0:
-            off_rate=OFFLINE_PROGRESS_RATE
-            if "automatic_production" in self.prestige_upgrades and self.prestige_upgrades["automatic_production"]["level"]>0:
-                lvl,info=self.prestige_upgrades["automatic_production"]["level"],PRESTIGE_UPGRADES["automatic_production"]
-                off_rate=info["effect"]["offline_progress"]*lvl
-            if off_rate>0:
-                self.generate_resources(off_time*off_rate)
-                t_str=f"{int(off_time)}s"; (f"{int(off_time/3600)}h {int((off_time%3600)/60)}m" if off_time>=3600 else (f"{int(off_time/60)}m {int(off_time%60)}s" if off_time>=60 else t_str))
-                self.add_notification(f"Welcome back! Offline: {t_str} ({int(off_rate*100)}% rate).",notification_type="info")
+        off_time = time.time() - data.get("save_time", time.time())
+        # Default rate; doubled-up via prestige upgrade if owned.
+        off_rate = OFFLINE_PROGRESS_RATE
+        if self.prestige_upgrades.get("automatic_production", {}).get("level", 0) > 0:
+            lvl = self.prestige_upgrades["automatic_production"]["level"]
+            off_rate = PRESTIGE_UPGRADES["automatic_production"]["effect"]["offline_progress"] * lvl
+
+        # Snapshot resources, apply offline gains, then diff so the UI can
+        # show a "welcome back" summary. Skipped for very short gaps.
+        if off_time > 5 and off_rate > 0:
+            before = dict(self.resources)
+            self.generate_resources(off_time * off_rate)
+            gained = {
+                r: self.resources[r] - before.get(r, 0)
+                for r in self.resources
+                if self.resources[r] - before.get(r, 0) > 0
+            }
+            self.pending_offline_summary = {
+                "elapsed_seconds": off_time,
+                "rate": off_rate,
+                "gained": gained,
+            }
 
     def calculate_max_affordable(self, cost):
         if not cost: return 0

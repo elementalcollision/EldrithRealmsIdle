@@ -29,7 +29,7 @@ class GameTab(Vertical):
 
     def compose(self) -> ComposeResult:
         if self.help_text:
-            yield Static(self.help_text, id="tab-help")
+            yield Static(self.help_text, classes="tab-help")
         yield DataTable(cursor_type="row", zebra_stripes=True)
 
     def on_mount(self) -> None:
