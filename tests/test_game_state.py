@@ -227,3 +227,62 @@ def test_check_unlocks_unlocks_higher_level_buildings():
     g.total_earnings = 5000
     g.check_unlocks()  # level 6, marketplace unlocks at 5
     assert g.buildings["marketplace"]["unlocked"] is True
+
+
+# ---------- Race roster ----------
+EXPECTED_RACES = {
+    "dwarf", "elf", "human", "goblin", "troll", "shade",
+    "fae", "celestial", "deepling", "dragon", "void_walker",
+}
+
+
+def test_all_expected_races_exist():
+    from game.constants import RACES
+    assert set(RACES) == EXPECTED_RACES
+
+
+def test_late_races_require_prestige():
+    from game.constants import RACES
+    for late in ("celestial", "deepling", "dragon", "void_walker"):
+        assert RACES[late].get("requires_prestige", 0) >= 1
+
+
+def test_initial_state_has_all_races():
+    g = fresh_state()
+    assert set(g.races) == EXPECTED_RACES
+    # Tier-1 races start unlocked, prestige-gated ones do not.
+    assert g.races["dwarf"]["unlocked"] is True
+    assert g.races["dragon"]["unlocked"] is False
+
+
+# ---------- Offline progress summary ----------
+def test_offline_summary_set_on_load(tmp_path):
+    g = fresh_state()
+    g.add_race("dwarf", 5)
+    save_path = str(tmp_path / "test.zsave")
+    g.save_game(save_path)
+
+    # Backdate save_time so load detects "elapsed" offline time.
+    import json, zlib
+    with open(save_path, "rb") as f:
+        data = json.loads(zlib.decompress(f.read()).decode())
+    data["save_time"] = time.time() - 600  # 10 minutes ago
+    with open(save_path, "wb") as f:
+        f.write(zlib.compress(json.dumps(data).encode(), level=9))
+
+    g2 = GameState()
+    assert g2.load_game(save_path)
+    assert g2.pending_offline_summary is not None
+    summary = g2.pending_offline_summary
+    assert summary["elapsed_seconds"] == pytest.approx(600, rel=0.1)
+    assert summary["rate"] > 0
+    assert any(amount > 0 for amount in summary["gained"].values())
+
+
+def test_offline_summary_skipped_for_short_gaps():
+    g = fresh_state()
+    blob = g.export_save_string()
+    g2 = GameState()
+    g2.import_save_string(blob)
+    # Roundtrip is sub-second; no welcome-back should fire.
+    assert g2.pending_offline_summary is None
