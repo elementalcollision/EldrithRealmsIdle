@@ -1,0 +1,47 @@
+Screen {
+    background: $background;
+}
+
+#status-bar {
+    height: 5;
+    border: round $primary;
+    padding: 0 1;
+}
+
+#status-line {
+    height: 1;
+}
+
+#log {
+    height: 6;
+    border: round $accent;
+    padding: 0 1;
+}
+
+#log-content {
+    height: 100%;
+    overflow-y: auto;
+}
+
+TabbedContent {
+    height: 1fr;
+}
+
+TabPane {
+    padding: 0;
+}
+
+DataTable {
+    height: 1fr;
+}
+
+DataTable > .datatable--cursor {
+    background: $accent;
+    color: $text;
+}
+
+#tab-help {
+    height: 1;
+    color: $text-muted;
+    padding: 0 1;
+}

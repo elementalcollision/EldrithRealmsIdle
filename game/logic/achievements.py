@@ -1,4 +1,5 @@
 from game.constants import ACHIEVEMENTS, RESOURCE_TYPES, RACES, BASE_INCOME_RATE
+from game.logic import race_abilities
 
 # --- Achievement Checking Logic ---
 def check_achievements(game_state):
@@ -185,8 +186,7 @@ def track_race_resource_generation(game_state, resource, amount):
                 bonus = race_info["resource_bonuses"][resource] * game_state.get_race_bonus_multiplier()
                 race_contribution *= bonus
             
-            # Assuming get_race_specific_ability_bonus is a method of game_state
-            ability_bonus = game_state.get_race_specific_ability_bonus(race_id, resource)
+            ability_bonus = race_abilities.get_race_specific_ability_bonus(game_state, race_id, resource)
             race_contribution *= ability_bonus
             
             race_contributions[race_id] = race_contribution
