@@ -14,6 +14,7 @@ from textual.widgets import Footer, Header, RichLog, Static, TabbedContent, TabP
 from game.constants import GAME_TITLE, RESOURCE_TYPES, PRESTIGE_REQUIREMENT_BASE
 from game.game_state import GameState
 from game.tui.format import short_num, format_seconds
+from game.tui.goals import GoalsTab
 from game.tui.modals import WelcomeBackModal
 from game.tui.tabs import (
     AchievementsTab, BuildingsTab, GameTab, PrestigeTab, RacesTab, ResearchTab,
@@ -79,11 +80,12 @@ class EldrithApp(App):
     SUB_TITLE = "An eldritch idle realm"
 
     BINDINGS = [
-        Binding("1", "show_tab('races')", "Races", show=True),
-        Binding("2", "show_tab('buildings')", "Buildings", show=True),
-        Binding("3", "show_tab('research')", "Research", show=True),
-        Binding("4", "show_tab('prestige')", "Prestige", show=True),
-        Binding("5", "show_tab('achievements')", "Achievements", show=True),
+        Binding("1", "show_tab('goals')", "Goals", show=True),
+        Binding("2", "show_tab('races')", "Races", show=True),
+        Binding("3", "show_tab('buildings')", "Buildings", show=True),
+        Binding("4", "show_tab('research')", "Research", show=True),
+        Binding("5", "show_tab('prestige')", "Prestige", show=True),
+        Binding("6", "show_tab('achievements')", "Achievements", show=True),
         Binding("b", "buy(1)", "Buy 1", show=True),
         Binding("B", "buy(10)", "Buy 10", show=False),
         Binding("M", "buy(-1)", "Buy Max", show=True),
@@ -107,16 +109,18 @@ class EldrithApp(App):
         yield Header(show_clock=True)
         self.status = StatusBar(self.game_state, id="status-bar")
         yield self.status
-        with TabbedContent(initial="races"):
-            with TabPane("[1] Races", id="races"):
+        with TabbedContent(initial="goals"):
+            with TabPane("(1) Goals", id="goals"):
+                yield GoalsTab(self.game_state)
+            with TabPane("(2) Races", id="races"):
                 yield RacesTab(self.game_state)
-            with TabPane("[2] Buildings", id="buildings"):
+            with TabPane("(3) Buildings", id="buildings"):
                 yield BuildingsTab(self.game_state)
-            with TabPane("[3] Research", id="research"):
+            with TabPane("(4) Research", id="research"):
                 yield ResearchTab(self.game_state)
-            with TabPane("[4] Prestige", id="prestige"):
+            with TabPane("(5) Prestige", id="prestige"):
                 yield PrestigeTab(self.game_state)
-            with TabPane("[5] Achievements", id="achievements"):
+            with TabPane("(6) Achievements", id="achievements"):
                 yield AchievementsTab(self.game_state)
         self.log_widget = RichLog(
             id="log", highlight=True, markup=True, wrap=True, max_lines=100,
@@ -176,10 +180,14 @@ class EldrithApp(App):
     def _tabbed(self) -> TabbedContent:
         return self.query_one(TabbedContent)
 
-    def _current_tab(self) -> GameTab:
+    def _current_tab(self):
+        """Return the inner tab widget (GameTab or GoalsTab)."""
         active = self._tabbed().active
         pane = self.query_one(f"TabPane#{active}")
-        return pane.query_one(GameTab)
+        for child in pane.children:
+            if isinstance(child, (GameTab, GoalsTab)):
+                return child
+        return None
 
     def action_show_tab(self, tab_id: str) -> None:
         self._tabbed().active = tab_id

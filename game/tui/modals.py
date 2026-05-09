@@ -31,6 +31,7 @@ class WelcomeBackModal(ModalScreen[None]):
         max-height: 24;
     }
     WelcomeBackModal #title {
+        height: 1;
         text-style: bold;
         color: $accent;
         text-align: center;
@@ -40,7 +41,9 @@ class WelcomeBackModal(ModalScreen[None]):
         margin-bottom: 1;
     }
     WelcomeBackModal Button {
-        width: 100%;
+        width: auto;
+        min-width: 20;
+        margin-top: 1;
     }
     """
 
@@ -66,7 +69,9 @@ class WelcomeBackModal(ModalScreen[None]):
         )
 
         with Vertical():
-            yield Static("[Welcome Back]", id="title")
+            # Plain text — Rich markup would try to parse the brackets
+            # ("[Welcome Back]") as a tag and eat the line.
+            yield Static("Welcome Back", id="title", markup=False)
             yield Static(body, id="body", markup=True)
             yield Button("Continue (Enter)", id="ok", variant="primary")
 
