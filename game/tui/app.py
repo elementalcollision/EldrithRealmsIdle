@@ -118,7 +118,10 @@ class EldrithApp(App):
                 yield PrestigeTab(self.game_state)
             with TabPane("[5] Achievements", id="achievements"):
                 yield AchievementsTab(self.game_state)
-        self.log_widget = RichLog(id="log", highlight=True, markup=True, wrap=True, max_lines=100)
+        self.log_widget = RichLog(
+            id="log", highlight=True, markup=True, wrap=True, max_lines=100,
+        )
+        self.log_widget.can_focus = False
         yield self.log_widget
         yield Footer()
 
@@ -136,6 +139,14 @@ class EldrithApp(App):
         if summary:
             self.game_state.pending_offline_summary = None
             self.push_screen(WelcomeBackModal(summary))
+        # Default focus to the active tab's DataTable so arrows move rows.
+        self.call_after_refresh(self._focus_active_table)
+
+    def _focus_active_table(self) -> None:
+        try:
+            self._current_tab().query_one("DataTable").focus()
+        except Exception:
+            pass
 
     # ---------------- Game loop ----------------
     def _tick(self) -> None:
@@ -172,6 +183,12 @@ class EldrithApp(App):
 
     def action_show_tab(self, tab_id: str) -> None:
         self._tabbed().active = tab_id
+        # Focus the DataTable so arrow keys move the cursor instead of
+        # scrolling the log.
+        try:
+            self._current_tab().query_one("DataTable").focus()
+        except Exception:
+            pass
 
     # ---------------- Buy / upgrade ----------------
     def action_buy(self, count: int) -> None:
