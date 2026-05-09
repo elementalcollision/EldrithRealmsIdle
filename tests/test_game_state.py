@@ -279,6 +279,48 @@ def test_offline_summary_set_on_load(tmp_path):
     assert any(amount > 0 for amount in summary["gained"].values())
 
 
+def test_load_backfills_missing_races_from_old_save(tmp_path):
+    """Saves from before new races were added must still load."""
+    import json, zlib
+    # Build an "old" save with only the original 3 races / fewer keys.
+    old_data = {
+        "resources": {"gold": 100, "wood": 0, "stone": 0, "food": 0,
+                      "mana": 0, "crystal": 0, "ancient_knowledge": 0,
+                      "prestige_points": 0},
+        "races": {
+            "dwarf": {"count": 0, "level": 1, "unlocked": True, "abilities": {}, "skills": {}},
+            "elf":   {"count": 0, "level": 1, "unlocked": True, "abilities": {}, "skills": {}},
+            "human": {"count": 0, "level": 1, "unlocked": True, "abilities": {}, "skills": {}},
+        },
+        "buildings": {"mine": {"count": 0, "level": 1, "unlocked": False}},
+        "research": {},
+        "prestige_upgrades": {},
+        "achievements": {},
+        "player_level": 1,
+        "total_earnings": 0,
+        "prestige_count": 0,
+        "prestige_points": 0,
+        "total_prestige_points": 0,
+        "permanent_multipliers": {"all": 1.0},
+        "total_play_time": 0,
+        "time_warp_active": False,
+        "time_warp_end_time": 0,
+        "time_warp_cooldown_end": 0,
+        "save_time": time.time(),
+        "version": "0.0.0",
+    }
+    save_path = tmp_path / "old.zsave"
+    save_path.write_bytes(zlib.compress(json.dumps(old_data).encode(), level=9))
+
+    g = GameState()
+    assert g.load_game(str(save_path)) is True
+    # Every race in current RACES must now be present.
+    for race_id in EXPECTED_RACES:
+        assert race_id in g.races
+    # And iterating + ticking must not KeyError.
+    g.update(1.0)
+
+
 def test_offline_summary_skipped_for_short_gaps():
     g = fresh_state()
     blob = g.export_save_string()
