@@ -180,6 +180,10 @@ class GameState:
                                   * (lvl_scale ** (b_data["level"] - 1)) * building_eff)
 
         base_rate += self.get_research_flat_bonus(resource)
+        if resource == "gold" and base_rate <= 0:
+            # Subsistence income (errata E16): when nothing produces gold,
+            # a trickle keeps the player able to afford a gold race again.
+            base_rate += C.SUBSISTENCE_GOLD_RATE
         return base_rate
 
     def get_race_contribution(self, race_id, resource, race_bonus_mult=None):

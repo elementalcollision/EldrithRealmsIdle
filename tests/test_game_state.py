@@ -36,10 +36,14 @@ def test_initial_unlocks_match_unlock_level_1():
 
 
 # ---------- Resource generation ----------
-def test_idle_with_no_units_produces_nothing():
+def test_idle_with_no_units_earns_only_subsistence_gold():
+    from game.constants import SUBSISTENCE_GOLD_RATE
     g = fresh_state()
     g.update(60.0)
-    assert g.resources["gold"] == 100  # starting gold, no production
+    # Nothing produces gold, so only the E16 subsistence trickle pays.
+    assert g.resources["gold"] == pytest.approx(100 + 60 * SUBSISTENCE_GOLD_RATE)
+    for r in ("wood", "stone", "food", "mana", "crystal", "ancient_knowledge"):
+        assert g.resources[r] == 0
 
 
 def test_dwarves_produce_gold_and_stone():

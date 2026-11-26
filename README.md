@@ -64,7 +64,8 @@ All keyboard. The footer shows the live binding list.
   tab marks inactive until the game has a transmutation system.
 - **Pacing:** the first prestige takes roughly half an hour to an hour, and each
   prestige run opens the next tier of races, buildings and research
-  (player levels 25, 35 and 50).
+  (player levels 25, 35 and 50). If nothing you own produces gold, a small
+  subsistence income pays out, so you can always afford a gold race again.
 
 ## Project structure
 

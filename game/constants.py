@@ -34,6 +34,10 @@ RACE_UPGRADE_COST_GROWTH = 2.0   # each further level-up costs this much more
 # requirement, and level 50 around the fourth (was linear: 1000 per level).
 LEVEL_EARNINGS_EXPONENT = 7
 LEVEL_EARNINGS_BASE = 1_000_000 / 24 ** LEVEL_EARNINGS_EXPONENT
+# Gold per second paid only while nothing you own produces gold (errata E16):
+# without it, a player holding only non-gold races and too little gold for a
+# gold race could never earn again. Normal play never sees it.
+SUBSISTENCE_GOLD_RATE = 0.25
 
 # --- Long-term progression ---
 PRESTIGE_REQUIREMENT_BASE = 1_000_000
@@ -66,7 +70,7 @@ __all__ = [
     "GAME_TITLE", "NOTIFICATION_PREFIXES",
     "BASE_INCOME_RATE", "UPGRADE_MULTIPLIER", "BASE_UPGRADE_COST", "COST_INCREASE_RATE",
     "RACE_COST_GROWTH", "RACE_UPGRADE_COST_MULT", "RACE_UPGRADE_COST_GROWTH",
-    "LEVEL_EARNINGS_BASE", "LEVEL_EARNINGS_EXPONENT",
+    "LEVEL_EARNINGS_BASE", "LEVEL_EARNINGS_EXPONENT", "SUBSISTENCE_GOLD_RATE",
     "PRESTIGE_REQUIREMENT_BASE", "PRESTIGE_SCALING", "PRESTIGE_BONUS_BASE",
     "RESEARCH_POINT_BASE_COST", "RESEARCH_POINT_COST_SCALING",
     "OFFLINE_PROGRESS_RATE", "OFFLINE_PROGRESS_MAX_RATE", "OFFLINE_PROGRESS_CAP",
