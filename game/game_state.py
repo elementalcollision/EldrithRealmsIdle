@@ -295,7 +295,8 @@ class GameState:
 
     @staticmethod
     def _level_for_earnings(total_earnings):
-        steps = (max(0.0, total_earnings) / C.LEVEL_EARNINGS_BASE) ** (1.0 / C.LEVEL_EARNINGS_EXPONENT)
+        ratio = min(max(0.0, total_earnings) / C.LEVEL_EARNINGS_BASE, 1e300)  # finite even for edited saves
+        steps = ratio ** (1.0 / C.LEVEL_EARNINGS_EXPONENT)
         return 1 + int(steps + 1e-9)  # epsilon: exact thresholds must not round down
 
     def check_unlocks(self):
@@ -786,7 +787,7 @@ class GameState:
                    "player_level","total_earnings","prestige_count","prestige_points","total_prestige_points",
                    "permanent_multipliers","total_play_time","time_warp_active","time_warp_remaining",
                    "time_warp_cooldown_remaining"]
-    SAVE_VERSION = "1.1.0"
+    SAVE_VERSION = "1.2.0"  # 1.1.0: errata E1-E14 fixes; 1.2.0: E11 level curve
 
     def _save_data(self):
         data = {k: getattr(self, k) for k in self.SAVE_FIELDS}
@@ -873,7 +874,12 @@ class GameState:
         save_time = data.get("save_time")
         if not (isinstance(save_time, (int, float)) and math.isfinite(save_time)):
             save_time = None
-        legacy = self._version_tuple(data.get("version", "0")) < self._version_tuple(self.SAVE_VERSION)
+        version = self._version_tuple(data.get("version", "0"))
+        # Before 1.1.0, abilities were auto-bought and could never be switched on.
+        pre_abilities = version < (1, 1, 0)
+        # Before 1.2.0, player level was linear in earnings (E11), so the same
+        # earnings meant a higher level and more unlocks.
+        pre_level_curve = version < (1, 2, 0)
 
         # Time Warp countdowns (errata E3). Saves before 1.1.0 stored
         # wall-clock deadlines; convert them as of the save's own time.
@@ -898,7 +904,7 @@ class GameState:
                 for m_id,m_stat in mstones.items():
                     if m_id in self.achievements[cat]: self.achievements[cat][m_id]=m_stat
         
-        self._sanitize_loaded_state(legacy=legacy)
+        self._sanitize_loaded_state(pre_abilities=pre_abilities, keep_unlocks=pre_level_curve)
 
         # Offline progress (errata E2): never negative (a save dated in the
         # future earns nothing) and capped at OFFLINE_PROGRESS_CAP, so moving
@@ -933,7 +939,7 @@ class GameState:
         return (const["unlock_level"] <= self.player_level
                 and self.prestige_count >= const.get("requires_prestige", 0))
 
-    def _sanitize_loaded_state(self, legacy=False):
+    def _sanitize_loaded_state(self, pre_abilities=False, keep_unlocks=False):
         """Reject impossible values from a save file or import string (errata E4).
 
         Numbers must be finite and non-negative; levels and counts are clamped
@@ -959,6 +965,15 @@ class GameState:
             v = table.get(key)
             return v if isinstance(v, dict) else {}
 
+        def unlocked_flag(old, const):
+            """Derived from level and prestige; a save from before the E11
+            level curve also keeps what it had unlocked (prestige gates still
+            apply), so owned content doesn't stop producing."""
+            if self._unlock_requirement_met(const):
+                return True
+            return (keep_unlocks and old.get("unlocked") is True
+                    and self.prestige_count >= const.get("requires_prestige", 0))
+
         def finite(v):
             x = num(v)
             return x if math.isfinite(x) else 0.0
@@ -976,7 +991,7 @@ class GameState:
             data = {
                 "count": whole(old.get("count", 0)),
                 "level": whole(old.get("level", 1), 1, const.get("max_level", math.inf), 1),
-                "unlocked": self._unlock_requirement_met(const),
+                "unlocked": unlocked_flag(old, const),
                 "skills": {res: finite(entry(old, "skills").get(res, 0)) for res in RESOURCE_TYPES},
                 "abilities": {},
             }
@@ -989,7 +1004,7 @@ class GameState:
                             and self.prestige_count >= req.get("prestige_level", 0))
                 # Abilities bought under the old auto-unlock (errata E5) could
                 # never be switched on; switch them on now.
-                active = unlocked and (legacy or bool(st.get("active", False)))
+                active = unlocked and (pre_abilities or bool(st.get("active", False)))
                 data["abilities"][ab_id] = {
                     "unlocked": unlocked,
                     "active": active,
@@ -1004,7 +1019,7 @@ class GameState:
             buildings[b_id] = {
                 "count": whole(old.get("count", 0), 0, const.get("max_count", math.inf)),
                 "level": whole(old.get("level", 1), 1, const["max_level"], 1),
-                "unlocked": self._unlock_requirement_met(const),
+                "unlocked": unlocked_flag(old, const),
             }
         self.buildings = buildings
 
@@ -1013,7 +1028,7 @@ class GameState:
             old = entry(self.research, r_id)
             research[r_id] = {
                 "level": whole(old.get("level", 0), 0, const["max_level"]),
-                "unlocked": self._unlock_requirement_met(const),
+                "unlocked": unlocked_flag(old, const),
             }
         self.research = research
 

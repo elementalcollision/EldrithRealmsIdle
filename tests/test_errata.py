@@ -545,3 +545,52 @@ def test_e11_no_runaway_in_the_first_ten_minutes():
     assert g.total_earnings > 1000            # the economy is moving
     assert g.calculate_prestige_points() == 0  # but no prestige yet
     assert g.player_level < 25
+
+
+def _v110_save(g, **changes):
+    data = _decode(g.export_save_string())
+    data["version"] = "1.1.0"
+    data.update(changes)
+    return data
+
+
+def test_e11_saves_from_before_the_curve_keep_their_unlocks():
+    """Found in review: 50,000 earnings was level 51 on the old linear curve
+    but is level ~16 now; owned content above 16 must keep producing."""
+    g = GameState()
+    g.races["fae"].update(unlocked=True, count=3, level=2)        # unlock level 18
+    g.buildings["crystal_mine"].update(unlocked=True, count=2)   # unlock level 15
+    g.research["racial_harmony"].update(unlocked=True, level=4)  # unlock level 20
+    data = _v110_save(g, total_earnings=50_000, player_level=51)
+    g2 = GameState()
+    assert g2.import_save_string(_encode(data))
+    assert g2.player_level < 18
+    assert g2.races["fae"]["unlocked"] and g2.buildings["crystal_mine"]["unlocked"]
+    assert g2.research["racial_harmony"]["unlocked"]
+    assert g2.calculate_resource_generation_rate("wood") > 0  # fae still produce
+    assert g2.races["celestial"]["unlocked"] is False  # prestige gate still applies
+
+
+def test_e11_current_saves_still_derive_unlocks():
+    g = GameState()
+    g.races["fae"].update(unlocked=True, count=3)
+    g2 = GameState()
+    assert g2.import_save_string(g.export_save_string())
+    assert g2.races["fae"]["unlocked"] is False  # 1.2.0 save at level 1: not earned
+
+
+def test_e11_v110_switched_off_ability_stays_off():
+    g = _ready_for_mountain_heart(GameState())
+    g.buy_race_ability("dwarf", "mountain_heart")
+    g.toggle_race_ability("dwarf", "mountain_heart")
+    g2 = GameState()
+    assert g2.import_save_string(_encode(_v110_save(g)))
+    assert ab.ability_status(g2, "dwarf", "mountain_heart") == "inactive"
+
+
+def test_e11_level_for_huge_earnings_is_finite():
+    assert GameState._level_for_earnings(1e305) > 1
+    g = GameState()
+    data = _decode(g.export_save_string())
+    data["total_earnings"] = 1e305
+    assert GameState().import_save_string(_encode(data))
