@@ -59,7 +59,12 @@ All keyboard. The footer shows the live binding list.
 - **Prestige** resets your run in exchange for prestige points and permanent
   bonuses. Unlocks higher-tier races, buildings, and research. Time Warp runs
   for an hour of play and cools down for a day (offline time counts).
-- **Achievements** trigger automatically and grant passive bonuses.
+- **Achievements** trigger automatically and grant passive bonuses. Every
+  listed reward applies, except dragon transmutation, which the Achievements
+  tab marks inactive until the game has a transmutation system.
+- **Pacing:** the first prestige takes roughly half an hour to an hour, and each
+  prestige run opens the next tier of races, buildings and research
+  (player levels 25, 35 and 50).
 
 ## Project structure
 
@@ -83,6 +88,7 @@ game/
 tests/
   test_game_state.py          # Headless pytest suite
   test_errata.py              # Regression tests for errata E1–E14 (exploits, traps, bugs)
+  test_rewards.py             # Every achievement reward and ability effect has a reader
 tools/
   balance_sim.py              # Headless greedy balance probe (economy pacing)
 ```
@@ -96,7 +102,15 @@ pytest
 ```
 
 Tests cover resource generation, cost scaling, prestige reset, time-warp
-gating, and save/load round-trip. The game logic in `game/game_state.py`
+gating, and save/load round-trip.
+
+Check economy pacing after changing costs or rewards (pacing knobs are in
+`game/constants.py`; `--set` overrides them for a run):
+
+```bash
+python tools/balance_sim.py . --hours 8 --prestige --decision 30
+python tools/balance_sim.py . --hours 2 --set BASE_INCOME_RATE=0.5
+``` The game logic in `game/game_state.py`
 has no Textual or pygame dependency — it can be driven by any UI.
 
 ## License

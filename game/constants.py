@@ -16,10 +16,24 @@ NOTIFICATION_PREFIXES = {
 }
 
 # --- Game balance ---
-BASE_INCOME_RATE = 5.0
+BASE_INCOME_RATE = 0.4  # per unit per race level per second (was 5.0; errata E11)
 UPGRADE_MULTIPLIER = 1.5
 BASE_UPGRADE_COST = 10
 COST_INCREASE_RATE = 1.2
+
+# --- Pacing (errata E11) ---
+# Tuned with tools/balance_sim.py (which overrides these by name). With the
+# probe's greedy player: level 10 at ~7 min, first prestige at ~35 min,
+# first race ability at ~2 h, four prestiges in ~5.5 h. Content is gated so
+# that run N (after N-1 prestiges) tops out around the next unlock tier.
+RACE_COST_GROWTH = 1.15          # each extra unit of a race costs this much more
+RACE_UPGRADE_COST_MULT = 5       # a race's first level-up costs base_cost x this
+RACE_UPGRADE_COST_GROWTH = 2.0   # each further level-up costs this much more
+# Player level L needs BASE * (L-1) ** EXPONENT total earnings this run.
+# Level 25 (the first prestige-gated unlocks) lands at the first prestige
+# requirement, and level 50 around the fourth (was linear: 1000 per level).
+LEVEL_EARNINGS_EXPONENT = 7
+LEVEL_EARNINGS_BASE = 1_000_000 / 24 ** LEVEL_EARNINGS_EXPONENT
 
 # --- Long-term progression ---
 PRESTIGE_REQUIREMENT_BASE = 1_000_000
@@ -51,6 +65,8 @@ from .constants_data.achievements_data import ACHIEVEMENTS
 __all__ = [
     "GAME_TITLE", "NOTIFICATION_PREFIXES",
     "BASE_INCOME_RATE", "UPGRADE_MULTIPLIER", "BASE_UPGRADE_COST", "COST_INCREASE_RATE",
+    "RACE_COST_GROWTH", "RACE_UPGRADE_COST_MULT", "RACE_UPGRADE_COST_GROWTH",
+    "LEVEL_EARNINGS_BASE", "LEVEL_EARNINGS_EXPONENT",
     "PRESTIGE_REQUIREMENT_BASE", "PRESTIGE_SCALING", "PRESTIGE_BONUS_BASE",
     "RESEARCH_POINT_BASE_COST", "RESEARCH_POINT_COST_SCALING",
     "OFFLINE_PROGRESS_RATE", "OFFLINE_PROGRESS_MAX_RATE", "OFFLINE_PROGRESS_CAP",

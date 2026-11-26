@@ -1,6 +1,8 @@
 """Tests for the Goals progress-tracker logic."""
 from __future__ import annotations
 
+import pytest
+
 from game.game_state import GameState
 from game.tui.goals import (
     GoalsTab, achievement_progress, earnings_for_level, fmt_pct, progress_bar,
@@ -33,8 +35,9 @@ def test_fmt_pct():
 
 def test_earnings_for_level():
     assert earnings_for_level(1) == 0
-    assert earnings_for_level(2) == 1000
-    assert earnings_for_level(5) == 4000
+    assert earnings_for_level(25) == pytest.approx(1_000_000)  # first prestige requirement
+    levels = [earnings_for_level(n) for n in range(1, 60)]
+    assert levels == sorted(levels)
 
 
 # ---------- achievement_progress ----------

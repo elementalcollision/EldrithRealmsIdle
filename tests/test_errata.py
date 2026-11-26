@@ -1,4 +1,4 @@
-"""Regression tests for errata E1–E14: exploits, traps and bugs in the game core,
+"""Regression tests for errata E1–E14 (and E11 pacing): exploits, traps and bugs in the game core,
 found by code reading and automated play-testing.
 
 Each test is named after its errata ID. All but three fail on the code at
@@ -301,11 +301,11 @@ def test_e5_every_buyable_ability_changes_something():
 def test_e5_unimplemented_abilities_cannot_be_bought():
     g = GameState()
     g.prestige_count = 10
-    g.races["troll"].update(unlocked=True, count=5, level=100)
+    g.races["dragon"].update(unlocked=True, count=5, level=100)
     for res in g.resources:
         g.resources[res] = 1e12
-    assert ab.ability_status(g, "troll", "iron_stomach") == "unimplemented"
-    assert g.buy_race_ability("troll", "iron_stomach") is False
+    assert ab.ability_status(g, "dragon", "elder_breath") == "unimplemented"
+    assert g.buy_race_ability("dragon", "elder_breath") is False
     assert g.resources["stone"] == 1e12
 
 
@@ -416,7 +416,8 @@ def test_e9_buy_max_handles_huge_budgets_quickly():
     t0 = time.time()
     assert g.buy_race("dwarf", -1)
     assert time.time() - t0 < 0.5
-    assert g.races["dwarf"]["count"] > 1e8
+    assert g.races["dwarf"]["count"] > 1
+    assert not g.can_afford(g.get_race_purchase_cost("dwarf", 1))  # bought the maximum
 
 
 # ---------- E10: races produce only their specialities ----------
@@ -498,3 +499,98 @@ def test_explicit_huge_count_is_refused_not_raised():
     g.races["dwarf"]["count"] = 1
     g.resources["gold"] = 1e300
     assert g.buy_race_upgrade("dwarf", 5000) is False
+
+
+# ---------- E11: runaway economy / pacing ----------
+def test_e11_level_curve_thresholds_are_exact():
+    for level in range(1, 201):
+        need = GameState.earnings_for_level(level)
+        assert GameState._level_for_earnings(need) == level
+        if level > 1:
+            assert GameState._level_for_earnings(need * (1 - 1e-6)) == level - 1
+
+
+def test_e11_level_gates_line_up_with_prestige():
+    from game.constants import PRESTIGE_REQUIREMENT_BASE
+    # Level 25 (first prestige-gated unlocks) at the first prestige requirement.
+    assert GameState._level_for_earnings(PRESTIGE_REQUIREMENT_BASE) == 25
+    # Level 50 (last unlock tier) needs far more than one run's requirement.
+    assert GameState.earnings_for_level(50) > 50 * PRESTIGE_REQUIREMENT_BASE
+
+
+def test_e11_race_costs_grow_geometrically():
+    g = GameState()
+    c = [g.get_race_purchase_cost("dwarf", 1, current_count_override=n)["gold"] for n in range(4)]
+    assert c[1] / c[0] == pytest.approx(c[3] / c[2])
+    assert c[1] > c[0]
+
+
+def test_e11_ability_gates_are_reachable_race_levels():
+    for race in RACES.values():
+        for ab_info in race["special_abilities"].values():
+            assert ab_info["unlock_requirements"]["race_level"] in (10, 20)
+
+
+def test_e11_no_runaway_in_the_first_ten_minutes():
+    """A simple greedy start must not reach the first prestige in 10 minutes
+    (the original economy passed it in under 3)."""
+    g = GameState()
+    for _ in range(60):  # 10 game-minutes, buying every 10 s
+        for race in ("dwarf", "elf", "human", "goblin", "troll"):
+            g.buy_race(race, -1)
+            g.buy_race_upgrade(race, -1)
+        for b in BUILDINGS:
+            g.buy_building(b, 1)
+        g.update(10.0)
+    assert g.total_earnings > 1000            # the economy is moving
+    assert g.calculate_prestige_points() == 0  # but no prestige yet
+    assert g.player_level < 25
+
+
+def _v110_save(g, **changes):
+    data = _decode(g.export_save_string())
+    data["version"] = "1.1.0"
+    data.update(changes)
+    return data
+
+
+def test_e11_saves_from_before_the_curve_keep_their_unlocks():
+    """Found in review: 50,000 earnings was level 51 on the old linear curve
+    but is level ~16 now; owned content above 16 must keep producing."""
+    g = GameState()
+    g.races["fae"].update(unlocked=True, count=3, level=2)        # unlock level 18
+    g.buildings["crystal_mine"].update(unlocked=True, count=2)   # unlock level 15
+    g.research["racial_harmony"].update(unlocked=True, level=4)  # unlock level 20
+    data = _v110_save(g, total_earnings=50_000, player_level=51)
+    g2 = GameState()
+    assert g2.import_save_string(_encode(data))
+    assert g2.player_level < 18
+    assert g2.races["fae"]["unlocked"] and g2.buildings["crystal_mine"]["unlocked"]
+    assert g2.research["racial_harmony"]["unlocked"]
+    assert g2.calculate_resource_generation_rate("wood") > 0  # fae still produce
+    assert g2.races["celestial"]["unlocked"] is False  # prestige gate still applies
+
+
+def test_e11_current_saves_still_derive_unlocks():
+    g = GameState()
+    g.races["fae"].update(unlocked=True, count=3)
+    g2 = GameState()
+    assert g2.import_save_string(g.export_save_string())
+    assert g2.races["fae"]["unlocked"] is False  # 1.2.0 save at level 1: not earned
+
+
+def test_e11_v110_switched_off_ability_stays_off():
+    g = _ready_for_mountain_heart(GameState())
+    g.buy_race_ability("dwarf", "mountain_heart")
+    g.toggle_race_ability("dwarf", "mountain_heart")
+    g2 = GameState()
+    assert g2.import_save_string(_encode(_v110_save(g)))
+    assert ab.ability_status(g2, "dwarf", "mountain_heart") == "inactive"
+
+
+def test_e11_level_for_huge_earnings_is_finite():
+    assert GameState._level_for_earnings(1e305) > 1
+    g = GameState()
+    data = _decode(g.export_save_string())
+    data["total_earnings"] = 1e305
+    assert GameState().import_save_string(_encode(data))
