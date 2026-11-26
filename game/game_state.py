@@ -12,6 +12,7 @@ from game.constants import (RESOURCE_TYPES, RACES, BUILDINGS, RESEARCH,
                            OFFLINE_PROGRESS_RATE, OFFLINE_PROGRESS_MAX_RATE, OFFLINE_PROGRESS_CAP,
                            TIME_WARP_DURATION, TIME_WARP_COOLDOWN)
 
+from game import constants as C  # pacing knobs read at call time, so they can be overridden
 from game.logic import achievements as achievement_logic
 from game.logic import race_abilities as ability_logic
 
@@ -289,8 +290,14 @@ class GameState:
         return False
     
     @staticmethod
+    def earnings_for_level(level):
+        """Total earnings (this run) needed to reach player ``level``."""
+        return C.LEVEL_EARNINGS_BASE * max(0, level - 1) ** C.LEVEL_EARNINGS_EXPONENT
+
+    @staticmethod
     def _level_for_earnings(total_earnings):
-        return 1 + int(total_earnings / 1000)
+        steps = (max(0.0, total_earnings) / C.LEVEL_EARNINGS_BASE) ** (1.0 / C.LEVEL_EARNINGS_EXPONENT)
+        return 1 + int(steps + 1e-9)  # epsilon: exact thresholds must not round down
 
     def check_unlocks(self):
         new_level = self._level_for_earnings(self.total_earnings)
@@ -330,13 +337,13 @@ class GameState:
     def get_race_purchase_cost(self, race_id, count=1, current_count_override=None):
         if race_id not in RACES or count <= 0: return {}
         cur_c = current_count_override if current_count_override is not None else self.races[race_id]["count"]
-        n, s = self._arith_units(count, cur_c)
-        return {"gold": RACES[race_id]["base_cost"] * (n + 0.15 * s)}
+        return {"gold": RACES[race_id]["base_cost"] * self._geom_sum(C.RACE_COST_GROWTH, cur_c, count)}
 
     def get_race_upgrade_cost(self, race_id, count=1, current_level_override=None):
         if race_id not in RACES or count <= 0: return {}
         cur_l = current_level_override if current_level_override is not None else self.races[race_id]["level"]
-        return {"gold": RACES[race_id]["base_cost"] * 5 * self._geom_sum(2.0, cur_l - 1, count)}
+        return {"gold": RACES[race_id]["base_cost"] * C.RACE_UPGRADE_COST_MULT
+                * self._geom_sum(C.RACE_UPGRADE_COST_GROWTH, cur_l - 1, count)}
 
     def _building_cost_reduction(self):
         return 0.95 if achievement_logic.has_achievement(self, "first_building") else 1.0
@@ -644,7 +651,7 @@ class GameState:
     # ---------- Prestige ----------
     def get_prestige_requirement(self):
         """Total-earnings threshold required to gain at least one prestige point."""
-        return PRESTIGE_REQUIREMENT_BASE * (PRESTIGE_SCALING ** self.prestige_count)
+        return C.PRESTIGE_REQUIREMENT_BASE * (C.PRESTIGE_SCALING ** self.prestige_count)
 
     def calculate_prestige_points(self):
         """Prestige points the player would gain if they prestiged right now."""

@@ -32,9 +32,10 @@ def fmt_pct(fraction: float) -> str:
     return f"{int(round(max(0.0, min(1.0, fraction)) * 100))}%"
 
 
-def earnings_for_level(level: int) -> int:
+def earnings_for_level(level: int) -> float:
     """Inverse of the player_level formula in GameState.check_unlocks."""
-    return max(0, (level - 1) * 1000)
+    from game.game_state import GameState
+    return GameState.earnings_for_level(level)
 
 
 def achievement_progress(gs, requirement: dict) -> tuple[float, str]:

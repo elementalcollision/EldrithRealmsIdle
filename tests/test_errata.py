@@ -416,7 +416,8 @@ def test_e9_buy_max_handles_huge_budgets_quickly():
     t0 = time.time()
     assert g.buy_race("dwarf", -1)
     assert time.time() - t0 < 0.5
-    assert g.races["dwarf"]["count"] > 1e8
+    assert g.races["dwarf"]["count"] > 1
+    assert not g.can_afford(g.get_race_purchase_cost("dwarf", 1))  # bought the maximum
 
 
 # ---------- E10: races produce only their specialities ----------

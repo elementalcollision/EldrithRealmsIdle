@@ -21,6 +21,14 @@ UPGRADE_MULTIPLIER = 1.5
 BASE_UPGRADE_COST = 10
 COST_INCREASE_RATE = 1.2
 
+# --- Pacing (errata E11) ---
+# Tuned with tools/balance_sim.py; the probe overrides these by name.
+RACE_COST_GROWTH = 1.15          # each extra unit of a race costs this much more
+RACE_UPGRADE_COST_MULT = 5       # a race's first level-up costs base_cost x this
+RACE_UPGRADE_COST_GROWTH = 2.0   # each further level-up costs this much more
+LEVEL_EARNINGS_BASE = 1000.0     # player level L needs BASE * (L-1) ** EXPONENT total earnings
+LEVEL_EARNINGS_EXPONENT = 1.0
+
 # --- Long-term progression ---
 PRESTIGE_REQUIREMENT_BASE = 1_000_000
 PRESTIGE_SCALING = 5.0
@@ -51,6 +59,8 @@ from .constants_data.achievements_data import ACHIEVEMENTS
 __all__ = [
     "GAME_TITLE", "NOTIFICATION_PREFIXES",
     "BASE_INCOME_RATE", "UPGRADE_MULTIPLIER", "BASE_UPGRADE_COST", "COST_INCREASE_RATE",
+    "RACE_COST_GROWTH", "RACE_UPGRADE_COST_MULT", "RACE_UPGRADE_COST_GROWTH",
+    "LEVEL_EARNINGS_BASE", "LEVEL_EARNINGS_EXPONENT",
     "PRESTIGE_REQUIREMENT_BASE", "PRESTIGE_SCALING", "PRESTIGE_BONUS_BASE",
     "RESEARCH_POINT_BASE_COST", "RESEARCH_POINT_COST_SCALING",
     "OFFLINE_PROGRESS_RATE", "OFFLINE_PROGRESS_MAX_RATE", "OFFLINE_PROGRESS_CAP",
