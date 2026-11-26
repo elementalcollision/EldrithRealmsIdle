@@ -53,10 +53,10 @@ class StatusBar(Static):
         prestige_pts = gs.calculate_prestige_points()
         twarp = ""
         if gs.time_warp_active:
-            remaining = max(0, gs.time_warp_end_time - time.time())
+            remaining = max(0, gs.time_warp_remaining)
             twarp = f" │ [yellow]⌛ Time Warp x{gs.get_time_warp_multiplier():.1f} ({format_seconds(remaining)} left)[/yellow]"
         elif gs.has_time_warp_unlocked():
-            cd = gs.time_warp_cooldown_end - time.time()
+            cd = gs.time_warp_cooldown_remaining
             if cd > 0:
                 twarp = f" │ Time Warp cooldown: {format_seconds(cd)}"
             else:
@@ -91,6 +91,8 @@ class EldrithApp(App):
         Binding("M", "buy(-1)", "Buy Max", show=True),
         Binding("u", "upgrade(1)", "Upgrade", show=True),
         Binding("U", "upgrade(-1)", "Upgrade Max", show=False),
+        Binding("a", "ability(0)", "Ability", show=True),
+        Binding("A", "ability(1)", "Ability 2", show=False),
         Binding("p", "prestige", "Prestige", show=True),
         Binding("t", "time_warp", "Time Warp", show=True),
         Binding("s", "save", "Save", show=True),
@@ -101,8 +103,14 @@ class EldrithApp(App):
         super().__init__()
         self.save_path = save_path
         self.game_state = GameState()
-        if os.path.exists(self.save_path):
-            self.game_state.load_game(self.save_path)
+        if os.path.exists(self.save_path) and not self.game_state.load_game(self.save_path):
+            # Keep an unreadable save instead of overwriting it on quit.
+            kept = f"{self.save_path}.unreadable-{int(time.time())}"
+            os.replace(self.save_path, kept)
+            self.game_state.add_notification(
+                f"Couldn't read the save; kept it as {kept} and started a new game.",
+                notification_type="error",
+            )
         self._last_tick = time.time()
 
     def compose(self) -> ComposeResult:
@@ -219,6 +227,19 @@ class EldrithApp(App):
         ok = tab.upgrade(key, count)
         if not ok:
             self.log_widget.write("[red]Cannot afford, at max level, or no effect.[/red]")
+        self._refresh_ui()
+
+    def action_ability(self, index: int) -> None:
+        tab = self._current_tab()
+        if not isinstance(tab, RacesTab):
+            self.log_widget.write("[dim]Abilities are on the Races tab (2).[/dim]")
+            return
+        key = tab.selected_key()
+        if key is None:
+            self.log_widget.write("[dim]Nothing selected.[/dim]")
+            return
+        if not tab.ability(key, index):
+            self.log_widget.write("[red]Ability locked, not affordable, or not available yet.[/red]")
         self._refresh_ui()
 
     # ---------------- Prestige / time warp ----------------

@@ -17,6 +17,7 @@ from textual.widgets import Static
 from game.constants import (
     ACHIEVEMENTS, BUILDINGS, PRESTIGE_UPGRADES, RACES, RESEARCH, RESOURCE_TYPES,
 )
+from game.logic import race_abilities as ability_logic
 from game.tui.format import format_seconds, short_num
 
 
@@ -111,10 +112,12 @@ def achievement_progress(gs, requirement: dict) -> tuple[float, str]:
             cur = skills.get(req["resource"], 0)
             return min(cur / req["amount"], 1.0), \
                    f"{short_num(cur)}/{short_num(req['amount'])} {req['resource']} via {race_id}"
-        if "all_resources" in req and skills:
+        produced = list(RACES.get(race_id, {}).get("resource_bonuses", {}))
+        if "all_resources" in req and produced:
+            # Same rule as the achievement check: every resource the race makes.
             n = req["all_resources"]
-            m = min(skills.values())
-            return min(m / n, 1.0), f"{short_num(m)}/{short_num(n)} all-res via {race_id}"
+            m = min(skills.get(r, 0) for r in produced)
+            return min(m / n, 1.0), f"{short_num(m)}/{short_num(n)} each resource via {race_id}"
 
     return 0.0, "—"
 
@@ -232,7 +235,7 @@ class GoalsTab(Vertical):
                 continue
             for ab_id, ab in (info.get("special_abilities") or {}).items():
                 state = data.get("abilities", {}).get(ab_id, {})
-                if state.get("unlocked"):
+                if state.get("unlocked") or not ability_logic.ability_is_implemented(ab):
                     continue
                 ureq = ab.get("unlock_requirements", {})
                 need_lv = ureq.get("race_level", 1)
@@ -242,6 +245,8 @@ class GoalsTab(Vertical):
                 # Use level fraction as the headline progress.
                 frac = lv_frac if prestige_ok else min(lv_frac, 0.99)
                 gate = "" if prestige_ok else f"  [yellow](needs prestige {need_prestige})[/yellow]"
+                if frac >= 1.0:
+                    gate = "  [cyan]ready: buy it in Races (a/A)[/cyan]"
                 ability_lines.append((
                     frac,
                     f"  {progress_bar(frac)} {fmt_pct(frac)}  "

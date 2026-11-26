@@ -62,9 +62,14 @@ class WelcomeBackModal(ModalScreen[None]):
             if amount > 0
         ) or "  (nothing accumulated)"
 
+        away = self.summary.get("away_seconds", elapsed)
+        cap_note = (
+            f" [dim](offline progress is capped at {format_seconds(elapsed)})[/dim]"
+            if self.summary.get("capped") else ""
+        )
         body = (
-            f"You were away for [bold]{format_seconds(elapsed)}[/bold] "
-            f"at [bold]{int(rate*100)}%[/bold] offline rate.\n\n"
+            f"You were away for [bold]{format_seconds(away)}[/bold] "
+            f"at [bold]{int(rate*100)}%[/bold] offline rate.{cap_note}\n\n"
             f"While you were gone you gained:\n{gained_lines}"
         )
 

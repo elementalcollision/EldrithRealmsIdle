@@ -13,6 +13,7 @@ from textual.widgets import DataTable, Static
 from game.constants import (
     RACES, BUILDINGS, RESEARCH, PRESTIGE_UPGRADES, ACHIEVEMENTS,
 )
+from game.logic import race_abilities as ability_logic
 from game.tui.format import short_num, format_cost
 
 
@@ -63,6 +64,9 @@ class GameTab(Vertical):
         return False
 
     def upgrade(self, key: str, count: int) -> bool:
+        return False
+
+    def ability(self, key: str, index: int) -> bool:
         return False
 
     # --- helpers ---
@@ -120,7 +124,8 @@ def _render_kv_block(title: str, entries: dict) -> str:
 # ---------------- Races ----------------
 class RacesTab(GameTab):
     columns = ("Race", "Count", "Lv", "Cost (Buy)", "Upgrade Cost")
-    help_text = "(b) buy 1   (B) buy 10   (M) buy max   (u) upgrade   (U) upgrade max"
+    help_text = ("(b) buy 1   (B) buy 10   (M) buy max   (u) upgrade   (U) upgrade max   "
+                 "(a)/(A) buy or switch ability 1/2")
 
     def rows(self):
         gs = self.game_state
@@ -161,14 +166,23 @@ class RacesTab(GameTab):
             )
             lines += ["", f"[bold]Bonuses:[/bold] {bonuses}"]
 
-        # Special abilities and their unlock state.
+        # Special abilities: bought explicitly, then switched on/off.
         abilities = info.get("special_abilities") or {}
         if abilities:
             lines += ["", "[bold]Abilities[/bold]"]
-            for ab_id, ab in abilities.items():
-                state = data.get("abilities", {}).get(ab_id, {})
-                if state.get("unlocked"):
-                    status = "[green]unlocked[/green]"
+            for idx, (ab_id, ab) in enumerate(abilities.items()):
+                key_hint = "a" if idx == 0 else "A"
+                st = ability_logic.ability_status(gs, key, ab_id)
+                cost = ability_logic.ability_cost(key, ab_id)
+                if st == "active":
+                    status = f"[green]active[/green] [dim]({key_hint} to switch off)[/dim]"
+                elif st == "inactive":
+                    status = f"[yellow]off[/yellow] [dim]({key_hint} to switch on)[/dim]"
+                elif st == "available":
+                    status = (f"[cyan]available[/cyan] — {format_cost(cost, gs.can_afford(cost))} "
+                              f"[dim]({key_hint} to buy)[/dim]")
+                elif st == "unimplemented":
+                    status = "[dim]not available yet (effect not implemented)[/dim]"
                 else:
                     req = ab.get("unlock_requirements", {})
                     parts = []
@@ -176,8 +190,8 @@ class RacesTab(GameTab):
                         parts.append(f"lv {req['race_level']}")
                     if "prestige_level" in req and req["prestige_level"] > 0:
                         parts.append(f"prestige {req['prestige_level']}")
-                    if "resources" in req:
-                        parts.append(", ".join(f"{short_num(v)} {k}" for k, v in req["resources"].items()))
+                    if cost:
+                        parts.append(", ".join(f"{short_num(v)} {k}" for k, v in cost.items()))
                     status = "[dim]locked[/dim]" + (f" ({'; '.join(parts)})" if parts else "")
                 lines.append(f"  • [bold]{ab['name']}[/bold] — {status}")
                 lines.append(f"    {ab['description']}")
@@ -206,33 +220,21 @@ class RacesTab(GameTab):
         return "\n".join(lines)
 
     def buy(self, key, count):
-        gs = self.game_state
-        if count == -1:
-            base = gs.get_race_purchase_cost(key, 1)
-            count = gs.calculate_max_affordable(base)
-            if count <= 0:
-                return False
-        cost = gs.get_race_purchase_cost(key, count)
-        if not gs.can_afford(cost):
-            return False
-        gs.spend_resources(cost)
-        return gs.add_race(key, count)
+        return self.game_state.buy_race(key, count)
 
     def upgrade(self, key, count):
+        return self.game_state.buy_race_upgrade(key, count)
+
+    def ability(self, key, index):
+        """Buy the race's ``index``-th ability, or switch it on/off if owned."""
         gs = self.game_state
-        if count == -1:
-            count = gs.calculate_max_affordable_levels(
-                key, "get_race_upgrade_cost",
-                gs.races[key]["level"],
-                int(RACES[key].get("max_level", 999)),
-            )
-            if count <= 0:
-                return False
-        cost = gs.get_race_upgrade_cost(key, count)
-        if not gs.can_afford(cost):
+        ab_ids = list((RACES.get(key, {}).get("special_abilities") or {}))
+        if index >= len(ab_ids):
             return False
-        gs.spend_resources(cost)
-        return gs.upgrade_race(key, count)
+        ab_id = ab_ids[index]
+        if gs.races[key]["abilities"].get(ab_id, {}).get("unlocked"):
+            return gs.toggle_race_ability(key, ab_id)
+        return gs.buy_race_ability(key, ab_id)
 
 
 # ---------------- Buildings ----------------
@@ -249,13 +251,15 @@ class BuildingsTab(GameTab):
                 continue
             cost = gs.get_building_purchase_cost(b_id, 1)
             at_max = data["level"] >= info["max_level"]
+            full = gs.building_room(b_id) <= 0
             up = gs.get_building_upgrade_cost(b_id, 1) if data["count"] > 0 and not at_max else None
+            max_count = info.get("max_count")
             out.append((
                 b_id,
                 info["name"],
-                short_num(data["count"]),
+                f"{short_num(data['count'])}/{max_count}" if max_count else short_num(data["count"]),
                 f"{data['level']}/{info['max_level']}",
-                format_cost(cost, gs.can_afford(cost)),
+                "MAX" if full else format_cost(cost, gs.can_afford(cost)),
                 "MAX" if at_max else (format_cost(up, gs.can_afford(up)) if up else "-"),
             ))
         return out
@@ -283,6 +287,8 @@ class BuildingsTab(GameTab):
         if gmult:
             mults = ", ".join(f"{k} ×{v:.2f}" for k, v in gmult.items())
             lines += ["", f"[bold]Global multiplier:[/bold] {mults}"]
+            if info.get("max_count"):
+                lines.append(f"[dim]Limit {info['max_count']}: the multiplier doesn't stack; upgrade it instead.[/dim]")
 
         if data["count"] > 0:
             preview = gs.get_building_upgrade_benefits(key)
@@ -303,41 +309,18 @@ class BuildingsTab(GameTab):
                 for name in dict.fromkeys(list(cur_b) + list(next_b)):
                     lines.append(f"  {name}: {cur_b.get(name, '-')} → {next_b.get(name, '-')}")
 
-        cost = gs.get_building_purchase_cost(key, 1)
-        lines += [
-            "",
-            _render_cost("Build cost", cost, gs.can_afford(cost)),
-        ]
+        if gs.building_room(key) > 0:
+            cost = gs.get_building_purchase_cost(key, 1)
+            lines += ["", _render_cost("Build cost", cost, gs.can_afford(cost))]
+        else:
+            lines += ["", "[bold]Build cost:[/bold] at limit"]
         return "\n".join(lines)
 
     def buy(self, key, count):
-        gs = self.game_state
-        if count == -1:
-            base = gs.get_building_purchase_cost(key, 1)
-            count = gs.calculate_max_affordable(base)
-            if count <= 0:
-                return False
-        cost = gs.get_building_purchase_cost(key, count)
-        if not gs.can_afford(cost):
-            return False
-        gs.spend_resources(cost)
-        return gs.add_building(key, count)
+        return self.game_state.buy_building(key, count)
 
     def upgrade(self, key, count):
-        gs = self.game_state
-        if count == -1:
-            count = gs.calculate_max_affordable_levels(
-                key, "get_building_upgrade_cost",
-                gs.buildings[key]["level"],
-                BUILDINGS[key]["max_level"],
-            )
-            if count <= 0:
-                return False
-        cost = gs.get_building_upgrade_cost(key, count)
-        if not gs.can_afford(cost):
-            return False
-        gs.spend_resources(cost)
-        return gs.upgrade_building(key, count)
+        return self.game_state.buy_building_upgrade(key, count)
 
 
 # ---------------- Research ----------------
@@ -394,12 +377,8 @@ class ResearchTab(GameTab):
         return self.upgrade(key, count)
 
     def upgrade(self, key, count):
-        gs = self.game_state
-        cost = gs.get_research_cost(key, 1)
-        if not gs.can_afford(cost):
-            return False
-        gs.spend_resources(cost)
-        return gs.research_technology(key)
+        # One level per press, whatever the count: research is deliberate.
+        return self.game_state.buy_research(key, 1)
 
 
 # ---------------- Prestige ----------------
@@ -457,12 +436,7 @@ class PrestigeTab(GameTab):
         return self.upgrade(key, count)
 
     def upgrade(self, key, count):
-        gs = self.game_state
-        cost = gs.get_prestige_upgrade_cost(key, 1)
-        if not gs.can_afford(cost):
-            return False
-        gs.spend_resources(cost)
-        return gs.purchase_prestige_upgrade(key)
+        return self.game_state.buy_prestige_upgrade(key)
 
 
 # ---------------- Achievements ----------------

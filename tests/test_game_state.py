@@ -165,7 +165,7 @@ def test_time_warp_activates_when_unlocked():
 def test_time_warp_blocks_on_cooldown():
     g = fresh_state()
     g.prestige_upgrades["time_warp"]["level"] = 1
-    g.time_warp_cooldown_end = time.time() + 3600
+    g.time_warp_cooldown_remaining = 3600
     assert g.activate_time_warp() is False
 
 

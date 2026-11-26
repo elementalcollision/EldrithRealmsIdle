@@ -25,8 +25,8 @@ python main.py
 ```
 
 The game autosaves to `~/.eldrith_realms_idle/autosave.zsave` on quit and
-loads it on startup. Offline progress accrues at a reduced rate while the
-game is closed.
+loads it on startup. Offline progress accrues at a reduced rate (50%, up to
+100% with Automatic Production) while the game is closed, for at most 24 hours.
 
 ## Controls
 
@@ -41,6 +41,7 @@ All keyboard. The footer shows the live binding list.
 | `M`        | Buy max affordable                            |
 | `u`        | Upgrade selected (1 level)                    |
 | `U`        | Upgrade as many levels as you can afford      |
+| `a` / `A`  | Races tab: buy the race's first / second ability, or switch it on and off once owned |
 | `p`        | Prestige (resets progression for prestige points) |
 | `t`        | Activate Time Warp (once unlocked via prestige) |
 | `s`        | Save now                                      |
@@ -48,11 +49,16 @@ All keyboard. The footer shows the live binding list.
 
 ## Game Mechanics
 
-- **Races** produce resources passively; level them up for bigger bonuses.
-- **Buildings** boost production directly or via global multipliers.
+- **Races** produce the resources they specialise in; level them up for bigger
+  bonuses. Each race has two special abilities: once the race and your prestige
+  count are high enough, buy one with `a`/`A`, then switch it on or off.
+- **Buildings** boost production directly or via global multipliers. Multiplier
+  buildings (Marketplace, Time Dilation Chamber) are limited to one each;
+  upgrade them instead.
 - **Research** spends ancient knowledge for permanent multipliers.
 - **Prestige** resets your run in exchange for prestige points and permanent
-  bonuses. Unlocks higher-tier races, buildings, and research.
+  bonuses. Unlocks higher-tier races, buildings, and research. Time Warp runs
+  for an hour of play and cools down for a day (offline time counts).
 - **Achievements** trigger automatically and grant passive bonuses.
 
 ## Project structure
@@ -76,6 +82,9 @@ game/
     styles.tcss               # Textual CSS
 tests/
   test_game_state.py          # Headless pytest suite
+  test_errata.py              # Regression tests for errata E1–E14 (exploits, traps, bugs)
+tools/
+  balance_sim.py              # Headless greedy balance probe (economy pacing)
 ```
 
 ## Development
