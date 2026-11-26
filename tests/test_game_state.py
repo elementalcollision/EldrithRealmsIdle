@@ -217,7 +217,7 @@ def test_import_invalid_save_returns_false():
 # ---------- Player level / unlocks ----------
 def test_check_unlocks_levels_up_with_earnings():
     g = fresh_state()
-    g.total_earnings = 5000  # 1 + 5000//1000 = 6
+    g.total_earnings = GameState.earnings_for_level(6)
     g.check_unlocks()
     assert g.player_level == 6
 

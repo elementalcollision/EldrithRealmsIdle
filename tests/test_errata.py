@@ -1,4 +1,4 @@
-"""Regression tests for errata E1–E14: exploits, traps and bugs in the game core,
+"""Regression tests for errata E1–E14 (and E11 pacing): exploits, traps and bugs in the game core,
 found by code reading and automated play-testing.
 
 Each test is named after its errata ID. All but three fail on the code at
@@ -499,3 +499,49 @@ def test_explicit_huge_count_is_refused_not_raised():
     g.races["dwarf"]["count"] = 1
     g.resources["gold"] = 1e300
     assert g.buy_race_upgrade("dwarf", 5000) is False
+
+
+# ---------- E11: runaway economy / pacing ----------
+def test_e11_level_curve_thresholds_are_exact():
+    for level in range(1, 201):
+        need = GameState.earnings_for_level(level)
+        assert GameState._level_for_earnings(need) == level
+        if level > 1:
+            assert GameState._level_for_earnings(need * (1 - 1e-6)) == level - 1
+
+
+def test_e11_level_gates_line_up_with_prestige():
+    from game.constants import PRESTIGE_REQUIREMENT_BASE
+    # Level 25 (first prestige-gated unlocks) at the first prestige requirement.
+    assert GameState._level_for_earnings(PRESTIGE_REQUIREMENT_BASE) == 25
+    # Level 50 (last unlock tier) needs far more than one run's requirement.
+    assert GameState.earnings_for_level(50) > 50 * PRESTIGE_REQUIREMENT_BASE
+
+
+def test_e11_race_costs_grow_geometrically():
+    g = GameState()
+    c = [g.get_race_purchase_cost("dwarf", 1, current_count_override=n)["gold"] for n in range(4)]
+    assert c[1] / c[0] == pytest.approx(c[3] / c[2])
+    assert c[1] > c[0]
+
+
+def test_e11_ability_gates_are_reachable_race_levels():
+    for race in RACES.values():
+        for ab_info in race["special_abilities"].values():
+            assert ab_info["unlock_requirements"]["race_level"] in (10, 20)
+
+
+def test_e11_no_runaway_in_the_first_ten_minutes():
+    """A simple greedy start must not reach the first prestige in 10 minutes
+    (the original economy passed it in under 3)."""
+    g = GameState()
+    for _ in range(60):  # 10 game-minutes, buying every 10 s
+        for race in ("dwarf", "elf", "human", "goblin", "troll"):
+            g.buy_race(race, -1)
+            g.buy_race_upgrade(race, -1)
+        for b in BUILDINGS:
+            g.buy_building(b, 1)
+        g.update(10.0)
+    assert g.total_earnings > 1000            # the economy is moving
+    assert g.calculate_prestige_points() == 0  # but no prestige yet
+    assert g.player_level < 25

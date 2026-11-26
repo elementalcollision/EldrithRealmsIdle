@@ -44,7 +44,7 @@ DT = 5.0
 MAX_BUYS_PER_DECISION = 25
 CHECKPOINTS = [600, 1800, 3600, 7200, 14400, 28800, 43200, 86400]
 LEVEL_MARKS = [10, 18, 25, 35, 50]
-RACE_MARKS = [50, 100]
+RACE_MARKS = [10, 15, 20, 25, 50]
 
 
 def parse_value(text):
@@ -80,6 +80,7 @@ class Sim:
         self.gs = env.GameState()
         self.banked = 0.0
         self.prestiges = []          # game times of each prestige
+        self.prestige_runs = []      # state of each run just before its prestige
         self.level_marks = {}
         self.race_marks = {}
         self.first_ability = None
@@ -222,10 +223,18 @@ class Sim:
         if pending < 1 or pending < gs.total_prestige_points:
             return
         earned = gs.total_earnings
+        run_state = {
+            "t_min": self.t / 60, "gained": pending, "run_earnings": earned,
+            "player_level": gs.player_level,
+            "max_race_level": max(d["level"] for d in gs.races.values()),
+            "abilities": sum(1 for d in gs.races.values() for a in d.get("abilities", {}).values()
+                             if a.get("unlocked")),
+        }
         if not gs.perform_prestige():
             return
         self.banked += earned
         self.prestiges.append(self.t)
+        self.prestige_runs.append(run_state)
         while True:
             options = []
             for uid in self.env.PRESTIGE_UPGRADES:
@@ -279,6 +288,7 @@ class Sim:
         out = {f"level_{m}": self.level_marks.get(m) for m in LEVEL_MARKS}
         out["prestige_count"] = len(self.prestiges)
         out["prestige_times"] = list(self.prestiges)
+        out["prestige_runs"] = list(self.prestige_runs)
         out["first_ability"] = self.first_ability
         out.update({f"race_level_{m}": self.race_marks.get(m) for m in RACE_MARKS})
         return out
@@ -392,6 +402,10 @@ def main():
             print(f"  {k}: {[round(x / 60, 1) for x in v]}")
         elif k == "prestige_count":
             print(f"  {k}: {v}")
+        elif k == "prestige_runs":
+            for i, r in enumerate(v, 1):
+                print(f"  prestige {i}: t={r['t_min']:.1f}m  +{r['gained']} pts  run={r['run_earnings']:.3g}  "
+                      f"lvl={r['player_level']}  maxrace={r['max_race_level']}  abil={r['abilities']}")
         else:
             print(f"  {k}: {'never' if v is None else round(v / 60, 1)}")
     print(f"(sim wall time {sim.wall:.1f}s)")
