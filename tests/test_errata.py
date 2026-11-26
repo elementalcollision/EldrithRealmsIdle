@@ -594,3 +594,40 @@ def test_e11_level_for_huge_earnings_is_finite():
     data = _decode(g.export_save_string())
     data["total_earnings"] = 1e305
     assert GameState().import_save_string(_encode(data))
+
+
+# ---------- E16: gold soft-lock after E10 ----------
+def _spend_down_on_elves():
+    """After a prestige with Faster Start, a careless spend on elves leaves
+    less gold than the cheapest gold race and no gold income."""
+    g = GameState()
+    g.prestige_upgrades["faster_start"]["level"] = 1
+    g.total_earnings = PRESTIGE_REQUIREMENT_BASE
+    assert g.perform_prestige()
+    g.buy_race("elf", 1)
+    g.buy_race_upgrade("elf", 1)
+    g.buy_race_upgrade("elf", 1)
+    while g.buy_race("elf", 1):
+        pass
+    assert g.resources["gold"] < g.get_race_purchase_cost("human", 1)["gold"]
+    return g
+
+
+def test_e16_subsistence_income_ends_the_soft_lock():
+    g = _spend_down_on_elves()
+    g.update(120.0)
+    assert g.total_earnings > 0 and g.player_level >= 2
+    assert g.buildings["mine"]["unlocked"]
+    assert g.buy_race("human", 1)  # a gold race is affordable again
+
+
+def test_e16_no_subsistence_while_anything_makes_gold():
+    from game.constants import SUBSISTENCE_GOLD_RATE
+    g = GameState()
+    g.add_race("dwarf", 1)
+    dwarf = g.get_race_contribution("dwarf", "gold")
+    assert g.calculate_resource_generation_rate("gold") == pytest.approx(dwarf)
+    assert dwarf != pytest.approx(dwarf + SUBSISTENCE_GOLD_RATE)
+    g2 = GameState()
+    g2.add_race("elf", 3)  # elves make no gold
+    assert g2.calculate_resource_generation_rate("gold") == pytest.approx(SUBSISTENCE_GOLD_RATE)
