@@ -40,6 +40,7 @@ BUILDINGS = {
         "description": "Increases gold production from all sources.",
         "base_cost": {"gold": 200, "wood": 100, "stone": 50},
         "global_multipliers": {"gold": 1.1},
+        "max_count": 1,  # the multiplier doesn't stack; levels improve it
         "unlock_level": 5,
         "max_level": 50,
         "level_scaling": 1.05,
@@ -78,6 +79,7 @@ BUILDINGS = {
         "description": "Manipulates time to increase all resource production.",
         "base_cost": {"gold": 50000, "crystal": 500, "ancient_knowledge": 200},
         "global_multipliers": {"all": 1.2},
+        "max_count": 1,  # the multiplier doesn't stack; levels improve it
         "unlock_level": 35,
         "requires_prestige": 2,
         "max_level": 20,

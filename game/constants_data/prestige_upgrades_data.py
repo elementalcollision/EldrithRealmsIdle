@@ -25,9 +25,9 @@ PRESTIGE_UPGRADES = {
     },
     "automatic_production": {
         "name": "Automatic Production",
-        "description": "Automatically generate resources even when game is closed.",
+        "description": "Earn more while the game is closed: +10 points of offline rate per level (50% → 100% at level 5).",
         "cost": {"prestige_points": 3},
-        "effect": {"offline_progress": 0.2},
+        "effect": {"offline_progress": 0.1},
         "max_level": 5,
         "effect_scaling": 1.0,
     },

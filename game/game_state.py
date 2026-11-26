@@ -1,5 +1,7 @@
+import copy
 import time
 import json
+import math
 import os
 import zlib
 import base64
@@ -7,7 +9,8 @@ import base64
 from game.constants import (RESOURCE_TYPES, RACES, BUILDINGS, RESEARCH,
                            PRESTIGE_UPGRADES, ACHIEVEMENTS, BASE_INCOME_RATE,
                            PRESTIGE_REQUIREMENT_BASE, PRESTIGE_SCALING, PRESTIGE_BONUS_BASE,
-                           OFFLINE_PROGRESS_RATE, TIME_WARP_DURATION, TIME_WARP_COOLDOWN)
+                           OFFLINE_PROGRESS_RATE, OFFLINE_PROGRESS_MAX_RATE, OFFLINE_PROGRESS_CAP,
+                           TIME_WARP_DURATION, TIME_WARP_COOLDOWN)
 
 from game.logic import achievements as achievement_logic
 from game.logic import race_abilities as ability_logic
@@ -26,7 +29,8 @@ class GameState:
                 for ability_id_key in race_data_const["special_abilities"]:
                     race_abilities[ability_id_key] = {
                         "unlocked": False,
-                        "active": False
+                        "active": False,
+                        "available_notified": False,
                     }
             
             race_skills = {}
@@ -78,13 +82,15 @@ class GameState:
         self.total_prestige_points = 0
         self.permanent_multipliers = {"all": 1.0}
         
-        # Time tracking
+        # Time tracking. Time Warp duration and cooldown are countdowns in
+        # seconds of game time (advanced by update() and by offline time on
+        # load), never wall-clock timestamps, so moving the clock does nothing.
         self.last_save_time = time.time()
         self.total_play_time = 0
         self.time_warp_active = False
-        self.time_warp_end_time = 0
-        self.time_warp_cooldown_end = 0
-        
+        self.time_warp_remaining = 0.0
+        self.time_warp_cooldown_remaining = 0.0
+
         # Notifications
         self.notifications = []
 
@@ -92,37 +98,61 @@ class GameState:
         # the UI consumes and clears it on startup.
         self.pending_offline_summary = None
     
+    # ---------- Prestige points ----------
+    # One counter only (errata E1): the spendable balance lives in
+    # resources["prestige_points"], and this attribute is a view onto it.
+    # Before, spending deducted from the resource but not from a separate
+    # counter, and every prestige restored the counter — refunding the spend.
+    @property
+    def prestige_points(self):
+        return self.resources.get("prestige_points", 0)
+
+    @prestige_points.setter
+    def prestige_points(self, value):
+        self.resources["prestige_points"] = value
+
     def update(self, elapsed_time):
-        if self.time_warp_active:
-            current_time = time.time()
-            if current_time >= self.time_warp_end_time:
-                self.time_warp_active = False
-                self.add_notification("Time Warp has ended!", notification_type="info")
-            else:
-                time_warp_multiplier = self.get_time_warp_multiplier()
-                elapsed_time *= time_warp_multiplier
-        
+        """Advance the game by ``elapsed_time`` seconds of real play."""
+        elapsed_time = max(0.0, float(elapsed_time))
+        effective_time = self._advance_time_warp(elapsed_time)
         self.total_play_time += elapsed_time
-        self.generate_resources(elapsed_time)
+        self.generate_resources(effective_time)
         self.check_unlocks()
         achievement_logic.check_achievements(self)
-    
+
+    def _advance_time_warp(self, elapsed_time):
+        """Count Time Warp timers down by ``elapsed_time`` and return the
+        production time that interval is worth (the warped part runs at the
+        warp multiplier)."""
+        self.time_warp_cooldown_remaining = max(0.0, self.time_warp_cooldown_remaining - elapsed_time)
+        if not self.time_warp_active:
+            return elapsed_time
+        warped = min(elapsed_time, max(0.0, self.time_warp_remaining))
+        self.time_warp_remaining -= warped
+        effective = warped * self.get_time_warp_multiplier() + (elapsed_time - warped)
+        if self.time_warp_remaining <= 0:
+            self.time_warp_active = False
+            self.time_warp_remaining = 0.0
+            self.add_notification("Time Warp has ended!", notification_type="info")
+        return effective
+
     def generate_resources(self, elapsed_time):
         ability_logic.apply_special_resource_generation(self, elapsed_time)
-        
+        # Chance-based abilities pay their expected value every tick, so
+        # production is deterministic (no RNG, no wall clock).
+        doubling = ability_logic.get_production_doubling_multiplier(self)
+
         for resource in RESOURCE_TYPES:
             if resource == "prestige_points": continue
-                
+
             generation_rate = self.calculate_resource_generation_rate(resource)
             amount_generated = generation_rate * elapsed_time
             global_multiplier = self.calculate_global_multiplier(resource)
             amount_generated *= global_multiplier
             time_modifier = ability_logic.get_time_based_modifier(self, resource)
             amount_generated *= time_modifier
-            
-            if ability_logic.check_production_doubling_chance(self):
-                amount_generated *= 2
-                
+            amount_generated *= doubling
+
             self.resources[resource] = self.resources.get(resource, 0) + amount_generated
             
             if resource == "gold": self.total_earnings += amount_generated
@@ -135,27 +165,44 @@ class GameState:
         base_rate += ability_logic.get_passive_generation_rate(self, resource)
         
         race_bonus_mult = self.get_race_bonus_multiplier()
-        for race_id, race_data in self.races.items():
-            if race_data["unlocked"] and race_data["count"] > 0:
-                race_info = RACES[race_id]
-                race_contrib = BASE_INCOME_RATE * race_data["count"] * race_data["level"]
-                if "resource_bonuses" in race_info and resource in race_info["resource_bonuses"]:
-                    bonus_cfg = race_info["resource_bonuses"][resource]
-                    bonus_val = bonus_cfg.get("base", bonus_cfg) if isinstance(bonus_cfg, dict) else bonus_cfg
-                    race_contrib *= (bonus_val * race_bonus_mult)
-                race_contrib *= ability_logic.get_race_specific_ability_bonus(self, race_id, resource)
-                race_contrib *= self.get_race_skill_multiplier(race_id, resource) 
-                base_rate += race_contrib
-        
+        for race_id in self.races:
+            base_rate += self.get_race_contribution(race_id, resource, race_bonus_mult)
+        base_rate += ability_logic.get_ability_byproduct_rate(self, resource, race_bonus_mult)
+
+        building_eff = ability_logic.get_building_efficiency(self)
         for b_id, b_data in self.buildings.items():
             if b_data["unlocked"] and b_data["count"] > 0:
                 b_info = BUILDINGS[b_id]
                 if "resource_production" in b_info and resource in b_info["resource_production"]:
                     lvl_scale = b_info.get("level_scaling", 1.0)
-                    base_rate += b_info["resource_production"][resource] * b_data["count"] * (lvl_scale ** (b_data["level"] - 1))
-        
-        base_rate += self.get_research_flat_bonus(resource) 
+                    base_rate += (b_info["resource_production"][resource] * b_data["count"]
+                                  * (lvl_scale ** (b_data["level"] - 1)) * building_eff)
+
+        base_rate += self.get_research_flat_bonus(resource)
         return base_rate
+
+    def get_race_contribution(self, race_id, resource, race_bonus_mult=None):
+        """Base production of ``resource`` per second from one race, before
+        global multipliers.
+
+        A race produces only the resources listed in its ``resource_bonuses``
+        (errata E10). Before, every race produced every resource at the base
+        rate, which made research currency and crystal free from the start.
+        """
+        race_data = self.races.get(race_id)
+        if not race_data or not race_data["unlocked"] or race_data["count"] <= 0:
+            return 0.0
+        bonuses = RACES[race_id].get("resource_bonuses", {})
+        if resource not in bonuses:
+            return 0.0
+        if race_bonus_mult is None:
+            race_bonus_mult = self.get_race_bonus_multiplier()
+        bonus_cfg = bonuses[resource]
+        bonus_val = bonus_cfg.get("base", 1.0) if isinstance(bonus_cfg, dict) else bonus_cfg
+        contrib = BASE_INCOME_RATE * race_data["count"] * race_data["level"] * bonus_val * race_bonus_mult
+        contrib *= ability_logic.get_race_specific_ability_bonus(self, race_id, resource)
+        contrib *= self.get_race_skill_multiplier(race_id, resource)
+        return contrib
     
     def calculate_global_multiplier(self, resource):
         multiplier = 1.0
@@ -207,6 +254,8 @@ class GameState:
     
     def add_building(self, building_id, count=1):
         if building_id in self.buildings and self.buildings[building_id]["unlocked"]:
+            if count > self.building_room(building_id):
+                return False  # would exceed max_count (errata E6)
             self.buildings[building_id]["count"] += count
             if count > 0 and self.buildings[building_id]["count"] == count: # Check for first build of this type
                  achievement_logic.check_building_achievements(self) 
@@ -239,8 +288,12 @@ class GameState:
             return True
         return False
     
+    @staticmethod
+    def _level_for_earnings(total_earnings):
+        return 1 + int(total_earnings / 1000)
+
     def check_unlocks(self):
-        new_level = 1 + int(self.total_earnings / 1000)
+        new_level = self._level_for_earnings(self.total_earnings)
         if new_level > self.player_level:
             self.player_level = new_level
             self.add_notification(f"Level up! You are now level {self.player_level}", notification_type="unlock")
@@ -257,56 +310,60 @@ class GameState:
             if not self.research[res_id]["unlocked"] and res_const["unlock_level"]<=self.player_level and self.prestige_count>=res_const.get("requires_prestige",0):
                 self.research[res_id]["unlocked"]=True; self.add_notification(f"New research unlocked: {res_const['name']}!",notification_type="unlock")
 
-    def get_race_purchase_cost(self, race_id, count=1):
-        if race_id not in RACES: return {}
-        info, data = RACES[race_id], self.races[race_id]
-        cost, cur_c = info["base_cost"], data["count"]
-        if count==1: return {"gold":cost*(1.0+(0.15*cur_c))}
-        return {"gold":sum(cost*(1.0+(0.15*(cur_c+i))) for i in range(count))}
+    # Cost functions use closed-form totals (arithmetic series for counts,
+    # geometric series for levels), so buying N at once costs the same as N
+    # single purchases and "buy max" can search large N cheaply (errata E9).
+    # The *_override parameters let callers price from a hypothetical
+    # starting count or level (errata E8: races and buildings lacked them).
+    @staticmethod
+    def _arith_units(count, start):
+        """Sum of (1 + step*(start+i)) for i < count, returned as (n, n*start + n(n-1)/2)."""
+        return count, count * start + count * (count - 1) / 2
 
-    def get_race_upgrade_cost(self, race_id, count=1):
-        if race_id not in RACES: return {}
-        info, data = RACES[race_id], self.races[race_id]
-        cost, cur_l = info["base_cost"]*5, data["level"]
-        if count==1: return {"gold":cost*(2.0**(cur_l-1))}
-        return {"gold":sum(cost*(2.0**(cur_l+i-1)) for i in range(count))}
+    @staticmethod
+    def _geom_sum(ratio, start, count):
+        """Sum of ratio**(start+i) for i < count."""
+        if ratio == 1.0:
+            return float(count)
+        return (ratio ** start) * (ratio ** count - 1.0) / (ratio - 1.0)
 
-    def get_building_purchase_cost(self, building_id, count=1):
-        if building_id not in BUILDINGS: return {}
-        info, data = BUILDINGS[building_id], self.buildings[building_id]
-        b_costs, cur_c = info["base_cost"], data["count"]
-        costs={}
-        reduct=0.95 if achievement_logic.has_achievement(self,"first_building") else 1.0
-        if count==1:
-            for r,a in b_costs.items():costs[r]=a*(1.0+(0.2*cur_c))*reduct
-        else:
-            for r,b_a in b_costs.items():costs[r]=sum(b_a*(1.0+(0.2*(cur_c+i)))*reduct for i in range(count))
-        return costs
+    def get_race_purchase_cost(self, race_id, count=1, current_count_override=None):
+        if race_id not in RACES or count <= 0: return {}
+        cur_c = current_count_override if current_count_override is not None else self.races[race_id]["count"]
+        n, s = self._arith_units(count, cur_c)
+        return {"gold": RACES[race_id]["base_cost"] * (n + 0.15 * s)}
 
-    def get_building_upgrade_cost(self, building_id, count=1):
-        if building_id not in BUILDINGS: return {}
-        info, data = BUILDINGS[building_id], self.buildings[building_id]
-        b_costs, cur_l = info["base_cost"], data["level"]
-        costs={}
-        reduct=0.95 if achievement_logic.has_achievement(self,"first_building") else 1.0
-        up_mult=2.0
-        if count==1:
-            for r,a in b_costs.items():costs[r]=a*(2.0**(cur_l-1))*reduct*up_mult
-        else:
-            for r,b_a in b_costs.items():costs[r]=sum(b_a*(2.0**(cur_l+i-1))*reduct*up_mult for i in range(count))
-        return costs
+    def get_race_upgrade_cost(self, race_id, count=1, current_level_override=None):
+        if race_id not in RACES or count <= 0: return {}
+        cur_l = current_level_override if current_level_override is not None else self.races[race_id]["level"]
+        return {"gold": RACES[race_id]["base_cost"] * 5 * self._geom_sum(2.0, cur_l - 1, count)}
+
+    def _building_cost_reduction(self):
+        return 0.95 if achievement_logic.has_achievement(self, "first_building") else 1.0
+
+    def get_building_purchase_cost(self, building_id, count=1, current_count_override=None):
+        if building_id not in BUILDINGS or count <= 0: return {}
+        cur_c = current_count_override if current_count_override is not None else self.buildings[building_id]["count"]
+        n, s = self._arith_units(count, cur_c)
+        reduct = self._building_cost_reduction()
+        return {r: a * (n + 0.2 * s) * reduct for r, a in BUILDINGS[building_id]["base_cost"].items()}
+
+    def get_building_upgrade_cost(self, building_id, count=1, current_level_override=None):
+        if building_id not in BUILDINGS or count <= 0: return {}
+        cur_l = current_level_override if current_level_override is not None else self.buildings[building_id]["level"]
+        reduct, up_mult = self._building_cost_reduction(), 2.0
+        geo = self._geom_sum(2.0, cur_l - 1, count)
+        return {r: a * geo * reduct * up_mult for r, a in BUILDINGS[building_id]["base_cost"].items()}
 
     def get_research_cost(self, research_id, count=1, current_level_override=None):
         if research_id not in RESEARCH: return {}
         info = RESEARCH[research_id]
         start_lvl = current_level_override if current_level_override is not None else self.research[research_id]["level"]
         actual_cnt = int(count) if count!=-1 else 1
-        costs,b_costs,scale={},info["cost"],info["cost_scaling"]
-        if actual_cnt==1:
-            for r,a in b_costs.items():costs[r]=a*(scale**start_lvl)
-        else:
-            for r,b_a in b_costs.items():costs[r]=sum(b_a*(scale**(start_lvl+i)) for i in range(actual_cnt))
-        return costs
+        if actual_cnt <= 0: return {}
+        geo = self._geom_sum(info["cost_scaling"], start_lvl, actual_cnt)
+        factor = ability_logic.get_research_cost_factor(self)
+        return {r: a * geo * factor for r, a in info["cost"].items()}
 
     def get_prestige_upgrade_cost(self, upgrade_id, count=1, current_level_override=None):
         if upgrade_id not in PRESTIGE_UPGRADES: return {}
@@ -345,6 +402,137 @@ class GameState:
     
     def can_afford_with_simulated(self, sim_res, costs): # Helper for calculate_max_affordable_levels
         return all(sim_res.get(r,0) >= a for r,a in costs.items())
+
+    # ---------- Purchases ----------
+    # Every buy_* method checks all preconditions (unlocked, owned, level and
+    # count caps, affordability) before spending, then charges and applies in
+    # one step, so a refused purchase never costs anything (errata E7).
+    # count=-1 means "as many as affordable" (errata E8, E9).
+    def max_affordable_count(self, total_cost_fn, cap=math.inf):
+        """Largest n <= cap whose total cost ``total_cost_fn(n)`` is affordable.
+
+        Costs must rise with n. Uses exponential then binary search, so it is
+        cheap even for very large n.
+        """
+        def affordable(n):
+            try:
+                cost = total_cost_fn(n)
+            except OverflowError:
+                return False
+            return bool(cost) and all(math.isfinite(a) for a in cost.values()) and self.can_afford(cost)
+
+        if cap < 1 or not affordable(1):
+            return 0
+        lo, hi = 1, 2
+        while hi <= cap and hi < (1 << 62) and affordable(hi):
+            lo, hi = hi, hi * 2
+        hi = int(min(hi, cap + 1))  # first n known to be unaffordable or over the cap
+        while hi - lo > 1:
+            mid = (lo + hi) // 2
+            if affordable(mid):
+                lo = mid
+            else:
+                hi = mid
+        return lo
+
+    def _resolve_count(self, count, cap, total_cost_fn):
+        """Turn a requested count (-1 = max) into one that fits the cap and
+        is affordable, or 0 if nothing can be bought."""
+        if count == -1:
+            return self.max_affordable_count(total_cost_fn, cap)
+        count = int(min(int(count), cap))  # clamp to the cap before pricing
+        if count < 1:
+            return 0
+        try:
+            cost = total_cost_fn(count)
+        except OverflowError:
+            return 0
+        return count if cost and self.can_afford(cost) else 0
+
+    def _charge(self, cost, apply):
+        """Spend ``cost`` and run ``apply``; refund if ``apply`` refuses."""
+        if not self.spend_resources(cost):
+            return False
+        if apply():
+            return True
+        for r, a in cost.items():  # defensive: preconditions were checked
+            self.resources[r] += a
+        return False
+
+    def building_room(self, building_id):
+        """How many more of this building may be built (inf if uncapped)."""
+        cap = BUILDINGS[building_id].get("max_count", math.inf)
+        return max(0, cap - self.buildings[building_id]["count"])
+
+    def buy_race(self, race_id, count=1):
+        if race_id not in self.races or not self.races[race_id]["unlocked"]:
+            return False
+        n = self._resolve_count(count, math.inf, lambda k: self.get_race_purchase_cost(race_id, k))
+        if n <= 0:
+            return False
+        return self._charge(self.get_race_purchase_cost(race_id, n), lambda: self.add_race(race_id, n))
+
+    def buy_race_upgrade(self, race_id, count=1):
+        data = self.races.get(race_id)
+        if not data or not data["unlocked"] or data["count"] <= 0:
+            return False
+        room = RACES[race_id].get("max_level", math.inf) - data["level"]
+        n = self._resolve_count(count, room, lambda k: self.get_race_upgrade_cost(race_id, k))
+        if n <= 0:
+            return False
+        return self._charge(self.get_race_upgrade_cost(race_id, n), lambda: self.upgrade_race(race_id, n))
+
+    def buy_building(self, building_id, count=1):
+        if building_id not in self.buildings or not self.buildings[building_id]["unlocked"]:
+            return False
+        n = self._resolve_count(count, self.building_room(building_id),
+                                lambda k: self.get_building_purchase_cost(building_id, k))
+        if n <= 0:
+            return False
+        return self._charge(self.get_building_purchase_cost(building_id, n),
+                            lambda: self.add_building(building_id, n))
+
+    def buy_building_upgrade(self, building_id, count=1):
+        data = self.buildings.get(building_id)
+        if not data or not data["unlocked"] or data["count"] <= 0:
+            return False
+        room = BUILDINGS[building_id]["max_level"] - data["level"]
+        n = self._resolve_count(count, room, lambda k: self.get_building_upgrade_cost(building_id, k))
+        if n <= 0:
+            return False
+        return self._charge(self.get_building_upgrade_cost(building_id, n),
+                            lambda: self.upgrade_building(building_id, n))
+
+    def buy_research(self, research_id, count=1):
+        data = self.research.get(research_id)
+        if not data or not data["unlocked"]:
+            return False
+        room = RESEARCH[research_id]["max_level"] - data["level"]
+        n = self._resolve_count(count, room, lambda k: self.get_research_cost(research_id, k))
+        if n <= 0:
+            return False
+
+        def apply():
+            for _ in range(n):
+                if not self.research_technology(research_id):
+                    return False
+            return True
+        return self._charge(self.get_research_cost(research_id, n), apply)
+
+    def buy_prestige_upgrade(self, upgrade_id):
+        data = self.prestige_upgrades.get(upgrade_id)
+        if not data or data["level"] >= PRESTIGE_UPGRADES[upgrade_id]["max_level"]:
+            return False
+        cost = self.get_prestige_upgrade_cost(upgrade_id, 1)
+        if not cost or not self.can_afford(cost):
+            return False
+        return self._charge(cost, lambda: self.purchase_prestige_upgrade(upgrade_id))
+
+    def buy_race_ability(self, race_id, ability_id):
+        return ability_logic.purchase_race_ability(self, race_id, ability_id)
+
+    def toggle_race_ability(self, race_id, ability_id):
+        return ability_logic.activate_race_ability(self, race_id, ability_id)
         
     def get_race_upgrade_benefits(self, race_id):
         if race_id not in self.races or not self.races[race_id]["unlocked"]: return None
@@ -388,6 +576,7 @@ class GameState:
         info,data=RESEARCH[research_id],self.research[research_id]
         curr_lvl,next_lvl,max_lvl=data["level"],data["level"]+1,info["max_level"]; curr_e,next_e={},{}
         effects,eff_s=info.get("effect",{}),info.get("effect_scaling",1.0)
+        eff_s *= ability_logic.get_research_effect_bonus(self)
         for type,val in effects.items():
             if type=="resource_multiplier":
                 for r,b_m in val.items():
@@ -420,7 +609,8 @@ class GameState:
         mult = 1.0
         if "racial_harmony" in self.research and self.research["racial_harmony"]["unlocked"] and self.research["racial_harmony"]["level"]>0:
             info=RESEARCH["racial_harmony"]
-            mult *= (1.0+((info["effect"]["race_bonus_multiplier"]-1.0)*self.research["racial_harmony"]["level"]*info.get("effect_scaling",1.0)))
+            mult *= (1.0+((info["effect"]["race_bonus_multiplier"]-1.0)*self.research["racial_harmony"]["level"]*info.get("effect_scaling",1.0)
+                          *ability_logic.get_research_effect_bonus(self)))
         for cat_key in ["race_milestones","race_skill_milestones"]:
             for m in ACHIEVEMENTS.get(cat_key,[]):
                 if self.achievements.get(cat_key,{}).get(m["id"]) and "all_race_efficiency" in m["reward"]:
@@ -429,11 +619,12 @@ class GameState:
 
     def get_research_multiplier(self, resource):
         mult = 1.0
+        effect_bonus = ability_logic.get_research_effect_bonus(self)
         for id, data_v in self.research.items():
             if data_v["unlocked"] and data_v["level"]>0:
                 info=RESEARCH[id]
                 if "effect" in info:
-                    eff,sc,lvl=info["effect"],info.get("effect_scaling",1.0),data_v["level"]
+                    eff,sc,lvl=info["effect"],info.get("effect_scaling",1.0)*effect_bonus,data_v["level"]
                     if "resource_multiplier" in eff and resource in eff["resource_multiplier"]:
                         mult *= (1.0+((eff["resource_multiplier"][resource]-1.0)*lvl*sc))
                     if "global_multiplier" in eff:
@@ -444,7 +635,10 @@ class GameState:
         bonus = 0.0
         if "reality_manipulation" in self.research and self.research["reality_manipulation"]["unlocked"]:
             lvl=self.research["reality_manipulation"]["level"]
-            if lvl>0: info=RESEARCH["reality_manipulation"]; bonus+=info["effect"]["idle_resource_generation"]*(info.get("effect_scaling",1.0)**(lvl-1))
+            if lvl>0:
+                info=RESEARCH["reality_manipulation"]
+                bonus+=(info["effect"]["idle_resource_generation"]*(info.get("effect_scaling",1.0)**(lvl-1))
+                        *ability_logic.get_research_effect_bonus(self))
         return bonus
 
     # ---------- Prestige ----------
@@ -494,9 +688,10 @@ class GameState:
             for r in ("wood", "stone", "food", "mana", "crystal")
         }
 
-        # Award points and bump counter.
+        # Award points and bump counter. The balance is the unspent points
+        # plus the new ones; spent points stay spent (errata E1).
+        balance = self.prestige_points + gained
         self.prestige_count += 1
-        self.prestige_points += gained
         self.total_prestige_points += gained
 
         # Reset resources.
@@ -505,7 +700,7 @@ class GameState:
         self.resources["ancient_knowledge"] = retained_knowledge
         for r, amt in retained_basic.items():
             self.resources[r] = amt
-        self.resources["prestige_points"] = self.prestige_points
+        self.prestige_points = balance
 
         # Reset progression-affected state.
         self.total_earnings = 0
@@ -520,6 +715,7 @@ class GameState:
             for ab in self.races[race_id].get("abilities", {}).values():
                 ab["unlocked"] = False
                 ab["active"] = False
+                ab["available_notified"] = False
 
         for b_id, b_const in BUILDINGS.items():
             self.buildings[b_id]["count"] = 0
@@ -533,6 +729,7 @@ class GameState:
                 and self.prestige_count >= r_const.get("requires_prestige", 0)
 
         self.time_warp_active = False
+        self.time_warp_remaining = 0.0
         self.add_notification(
             f"Prestiged! Gained {gained} prestige points.",
             notification_type="achievement",
@@ -556,17 +753,16 @@ class GameState:
         if not self.has_time_warp_unlocked():
             self.add_notification("Time Warp not yet unlocked (prestige upgrade).", notification_type="error")
             return False
-        now = time.time()
         if self.time_warp_active:
             self.add_notification("Time Warp already active.", notification_type="error")
             return False
-        if now < self.time_warp_cooldown_end:
-            remaining = int(self.time_warp_cooldown_end - now)
+        if self.time_warp_cooldown_remaining > 0:
+            remaining = int(math.ceil(self.time_warp_cooldown_remaining))
             self.add_notification(f"Time Warp cooling down ({remaining}s left).", notification_type="error")
             return False
         self.time_warp_active = True
-        self.time_warp_end_time = now + TIME_WARP_DURATION
-        self.time_warp_cooldown_end = now + TIME_WARP_COOLDOWN
+        self.time_warp_remaining = float(TIME_WARP_DURATION)
+        self.time_warp_cooldown_remaining = float(TIME_WARP_COOLDOWN)
         self.add_notification(
             f"Time Warp active! {self.get_time_warp_multiplier():.1f}x for {TIME_WARP_DURATION//60} min.",
             notification_type="achievement",
@@ -583,9 +779,21 @@ class GameState:
             self.notifications = []
         return n_copy  # type: ignore
     
+    # Fields written to a save. prestige_points duplicates
+    # resources["prestige_points"] and is kept so older builds can read the file.
+    SAVE_FIELDS = ["resources","races","buildings","research","prestige_upgrades","achievements",
+                   "player_level","total_earnings","prestige_count","prestige_points","total_prestige_points",
+                   "permanent_multipliers","total_play_time","time_warp_active","time_warp_remaining",
+                   "time_warp_cooldown_remaining"]
+    SAVE_VERSION = "1.1.0"
+
+    def _save_data(self):
+        data = {k: getattr(self, k) for k in self.SAVE_FIELDS}
+        data.update({"save_time": time.time(), "version": self.SAVE_VERSION})
+        return data
+
     def save_game(self, filename="save.json", compressed=True):
-        data = {k:getattr(self,k) for k in ["resources","races","buildings","research","prestige_upgrades","achievements","player_level","total_earnings","prestige_count","prestige_points","total_prestige_points","permanent_multipliers","total_play_time","time_warp_active","time_warp_end_time","time_warp_cooldown_end"]}
-        data.update({"save_time":time.time(),"version":"1.0.0"})
+        data = self._save_data()
         try:
             d_name=os.path.dirname(filename); (os.makedirs(d_name) if d_name and not os.path.exists(d_name) else None)
             comp=compressed or filename.endswith(".zsave")
@@ -599,9 +807,7 @@ class GameState:
     
     def export_save_string(self):
         try:
-            data = {k:getattr(self,k) for k in ["resources","races","buildings","research","prestige_upgrades","achievements","player_level","total_earnings","prestige_count","prestige_points","total_prestige_points","permanent_multipliers","total_play_time","time_warp_active","time_warp_end_time","time_warp_cooldown_end"]}
-            data.update({"save_time":time.time(),"version":"1.0.0"})
-            return base64.b64encode(zlib.compress(json.dumps(data).encode('utf-8'),level=9)).decode('utf-8')
+            return base64.b64encode(zlib.compress(json.dumps(self._save_data()).encode('utf-8'),level=9)).decode('utf-8')
         except Exception as e: print(f"Error exporting save string: {e}"); return None
     
     def import_save_string(self, save_str):
@@ -616,75 +822,91 @@ class GameState:
             with open(filename,'rb' if filename.endswith(".zsave") else 'r') as f: data=json.loads(zlib.decompress(f.read()).decode('utf-8') if filename.endswith(".zsave") else json.load(f))
             self._apply_save_data(data); return True
         except Exception as e: print(f"Error loading game: {e}"); return False
-    
+
+    @staticmethod
+    def _version_tuple(version):
+        try:
+            return tuple(int(p) for p in str(version).split("."))
+        except ValueError:
+            return (0,)
+
+    def get_offline_rate(self):
+        """Share of normal production earned while the game is closed.
+
+        Automatic Production adds to the base rate (errata E14: it used to
+        replace it, so level 1 cut the rate from 50% to 20%).
+        """
+        lvl = self.prestige_upgrades.get("automatic_production", {}).get("level", 0)
+        bonus = PRESTIGE_UPGRADES["automatic_production"]["effect"]["offline_progress"] * lvl
+        return min(OFFLINE_PROGRESS_MAX_RATE, OFFLINE_PROGRESS_RATE + bonus)
+
     def _apply_save_data(self, data):
-        for k in ["resources","races","buildings","research","prestige_upgrades","player_level","total_earnings","prestige_count","prestige_points","total_prestige_points","permanent_multipliers","total_play_time","time_warp_active","time_warp_end_time","time_warp_cooldown_end"]:
+        """Load ``data`` into this state, all or nothing: if anything in it
+        is unusable the state is left exactly as it was and the error is
+        re-raised (load_game / import_save_string then return False)."""
+        snapshot = copy.deepcopy(self.__dict__)
+        try:
+            self._apply_save_data_unchecked(data)
+        except Exception:
+            self.__dict__.clear()
+            self.__dict__.update(snapshot)
+            raise
+
+    def _apply_save_data_unchecked(self, data):
+        if not isinstance(data, dict):
+            raise ValueError("save data must be a JSON object")
+        for k in ["resources","races","buildings","research","prestige_upgrades","player_level","total_earnings","prestige_count","total_prestige_points","permanent_multipliers","total_play_time","time_warp_active"]:
             setattr(self,k,data.get(k,getattr(self,k)))
+        for k in ("resources", "races", "buildings", "research", "prestige_upgrades"):
+            if not isinstance(getattr(self, k), dict):
+                raise ValueError(f"save field {k!r} must be an object")
 
-        # Save migration: backfill any race/building/research/prestige entries
-        # that were added in a newer version of the game but aren't in this
-        # save file. Without this, accessing the new keys would KeyError.
-        for race_id, race_const in RACES.items():
-            if race_id not in self.races:
-                abilities = {
-                    ab_id: {"unlocked": False, "active": False}
-                    for ab_id in race_const.get("special_abilities", {})
-                }
-                self.races[race_id] = {
-                    "count": 0,
-                    "level": 1,
-                    "unlocked": race_const["unlock_level"] == 1
-                        and self.prestige_count >= race_const.get("requires_prestige", 0),
-                    "abilities": abilities,
-                    "skills": {res: 0 for res in RESOURCE_TYPES},
-                }
-            else:
-                # Ensure new abilities on an existing race are present.
-                race_data = self.races[race_id]
-                race_data.setdefault("abilities", {})
-                for ab_id in race_const.get("special_abilities", {}):
-                    race_data["abilities"].setdefault(
-                        ab_id, {"unlocked": False, "active": False}
-                    )
+        # Prestige balance (errata E1): resources["prestige_points"] is the
+        # spendable balance. Older saves also carry a separate counter that
+        # spending never reduced; use it only if the balance is missing.
+        if "prestige_points" not in self.resources:
+            self.resources["prestige_points"] = data.get("prestige_points", 0)
 
-        for b_id, b_const in BUILDINGS.items():
-            if b_id not in self.buildings:
-                self.buildings[b_id] = {
-                    "count": 0,
-                    "level": 1,
-                    "unlocked": b_const["unlock_level"] <= 1
-                        and self.prestige_count >= b_const.get("requires_prestige", 0),
-                }
+        save_time = data.get("save_time")
+        if not (isinstance(save_time, (int, float)) and math.isfinite(save_time)):
+            save_time = None
+        legacy = self._version_tuple(data.get("version", "0")) < self._version_tuple(self.SAVE_VERSION)
 
-        for r_id, r_const in RESEARCH.items():
-            if r_id not in self.research:
-                self.research[r_id] = {
-                    "level": 0,
-                    "unlocked": r_const["unlock_level"] <= 1
-                        and self.prestige_count >= r_const.get("requires_prestige", 0),
-                }
+        # Time Warp countdowns (errata E3). Saves before 1.1.0 stored
+        # wall-clock deadlines; convert them as of the save's own time.
+        if "time_warp_remaining" in data or "time_warp_cooldown_remaining" in data:
+            self.time_warp_remaining = data.get("time_warp_remaining", 0.0)
+            self.time_warp_cooldown_remaining = data.get("time_warp_cooldown_remaining", 0.0)
+        else:
+            ref = save_time if save_time is not None else time.time()
+            def _deadline(key):
+                v = data.get(key, 0)
+                return v - ref if isinstance(v, (int, float)) and math.isfinite(v) else 0.0
+            self.time_warp_remaining = _deadline("time_warp_end_time")
+            self.time_warp_cooldown_remaining = _deadline("time_warp_cooldown_end")
 
-        for u_id in PRESTIGE_UPGRADES:
-            if u_id not in self.prestige_upgrades:
-                self.prestige_upgrades[u_id] = {"level": 0}
-
-        for r_id, r_data in self.races.items():
-            if "skills" not in r_data:
-                r_data["skills"] = {res_t: 0 for res_t in RESOURCE_TYPES}
-        
+        # Missing, unknown or out-of-range entries (saves from older or newer
+        # versions, or edited saves) are rebuilt by _sanitize_loaded_state.
         def_ach_struct={c_k:{ach["id"]:False for ach in ach_l} for c_k,ach_l in ACHIEVEMENTS.items()}
         loaded_ach=data.get("achievements",{}); self.achievements=def_ach_struct.copy()
+        if not isinstance(loaded_ach, dict): loaded_ach = {}
         for cat,mstones in loaded_ach.items():
-            if cat in self.achievements:
+            if cat in self.achievements and isinstance(mstones, dict):
                 for m_id,m_stat in mstones.items():
                     if m_id in self.achievements[cat]: self.achievements[cat][m_id]=m_stat
         
-        off_time = time.time() - data.get("save_time", time.time())
-        # Default rate; doubled-up via prestige upgrade if owned.
-        off_rate = OFFLINE_PROGRESS_RATE
-        if self.prestige_upgrades.get("automatic_production", {}).get("level", 0) > 0:
-            lvl = self.prestige_upgrades["automatic_production"]["level"]
-            off_rate = PRESTIGE_UPGRADES["automatic_production"]["effect"]["offline_progress"] * lvl
+        self._sanitize_loaded_state(legacy=legacy)
+
+        # Offline progress (errata E2): never negative (a save dated in the
+        # future earns nothing) and capped at OFFLINE_PROGRESS_CAP, so moving
+        # the clock or editing save_time gains at most one cap's worth.
+        away = (time.time() - save_time) if save_time is not None else 0.0
+        off_time = min(max(0.0, away), OFFLINE_PROGRESS_CAP)
+        off_rate = self.get_offline_rate()
+        if off_time > 0:
+            # Time Warp timers keep running while away; the warp itself
+            # doesn't boost offline gains.
+            self._advance_time_warp(off_time)
 
         # Snapshot resources, apply offline gains, then diff so the UI can
         # show a "welcome back" summary. Skipped for very short gaps.
@@ -698,9 +920,118 @@ class GameState:
             }
             self.pending_offline_summary = {
                 "elapsed_seconds": off_time,
+                "away_seconds": away,
+                "capped": away > OFFLINE_PROGRESS_CAP,
                 "rate": off_rate,
                 "gained": gained,
             }
+
+    def _unlock_requirement_met(self, const):
+        return (const["unlock_level"] <= self.player_level
+                and self.prestige_count >= const.get("requires_prestige", 0))
+
+    def _sanitize_loaded_state(self, legacy=False):
+        """Reject impossible values from a save file or import string (errata E4).
+
+        Numbers must be finite and non-negative; levels and counts are clamped
+        to their caps; values that follow from others (player level, unlocks,
+        permanent multipliers) are recomputed instead of trusted; unknown
+        entries are dropped. Amounts that normal play could reach are still
+        accepted: editing your own single-player save is not prevented.
+        """
+        def num(v, lo=0.0, hi=math.inf, default=0.0):
+            try:
+                v = float(v)
+            except (TypeError, ValueError, OverflowError):
+                return default
+            if math.isnan(v):
+                return default
+            return min(max(v, lo), hi)
+
+        def whole(v, lo=0, hi=math.inf, default=0):
+            x = num(v, lo, hi, default)
+            return int(x) if math.isfinite(x) else default
+
+        def entry(table, key):
+            v = table.get(key)
+            return v if isinstance(v, dict) else {}
+
+        def finite(v):
+            x = num(v)
+            return x if math.isfinite(x) else 0.0
+
+        self.resources = {r: finite(self.resources.get(r, 0)) for r in RESOURCE_TYPES}
+        self.total_earnings = finite(self.total_earnings)
+        self.total_play_time = finite(self.total_play_time)
+        self.prestige_count = whole(self.prestige_count)
+        self.total_prestige_points = max(finite(self.total_prestige_points), self.prestige_points)
+        self.player_level = self._level_for_earnings(self.total_earnings)
+
+        races = {}
+        for race_id, const in RACES.items():
+            old = entry(self.races, race_id)
+            data = {
+                "count": whole(old.get("count", 0)),
+                "level": whole(old.get("level", 1), 1, const.get("max_level", math.inf), 1),
+                "unlocked": self._unlock_requirement_met(const),
+                "skills": {res: finite(entry(old, "skills").get(res, 0)) for res in RESOURCE_TYPES},
+                "abilities": {},
+            }
+            old_abilities = entry(old, "abilities")
+            for ab_id, ab_const in const.get("special_abilities", {}).items():
+                st = entry(old_abilities, ab_id)
+                req = ab_const.get("unlock_requirements", {})
+                unlocked = (bool(st.get("unlocked", False))
+                            and data["level"] >= req.get("race_level", 0)
+                            and self.prestige_count >= req.get("prestige_level", 0))
+                # Abilities bought under the old auto-unlock (errata E5) could
+                # never be switched on; switch them on now.
+                active = unlocked and (legacy or bool(st.get("active", False)))
+                data["abilities"][ab_id] = {
+                    "unlocked": unlocked,
+                    "active": active,
+                    "available_notified": bool(st.get("available_notified", unlocked)),
+                }
+            races[race_id] = data
+        self.races = races
+
+        buildings = {}
+        for b_id, const in BUILDINGS.items():
+            old = entry(self.buildings, b_id)
+            buildings[b_id] = {
+                "count": whole(old.get("count", 0), 0, const.get("max_count", math.inf)),
+                "level": whole(old.get("level", 1), 1, const["max_level"], 1),
+                "unlocked": self._unlock_requirement_met(const),
+            }
+        self.buildings = buildings
+
+        research = {}
+        for r_id, const in RESEARCH.items():
+            old = entry(self.research, r_id)
+            research[r_id] = {
+                "level": whole(old.get("level", 0), 0, const["max_level"]),
+                "unlocked": self._unlock_requirement_met(const),
+            }
+        self.research = research
+
+        self.prestige_upgrades = {
+            u_id: {"level": whole(entry(self.prestige_upgrades, u_id).get("level", 0), 0, const["max_level"])}
+            for u_id, const in PRESTIGE_UPGRADES.items()
+        }
+        # Cosmic Insight is the only source of permanent multipliers.
+        insight = PRESTIGE_UPGRADES["cosmic_insight"]["effect"]["permanent_multiplier"]
+        self.permanent_multipliers = {"all": insight ** self.prestige_upgrades["cosmic_insight"]["level"]}
+
+        for cat in self.achievements:
+            for m_id, done in self.achievements[cat].items():
+                self.achievements[cat][m_id] = done is True
+
+        self.time_warp_remaining = num(self.time_warp_remaining, 0.0, TIME_WARP_DURATION)
+        self.time_warp_cooldown_remaining = num(self.time_warp_cooldown_remaining, 0.0, TIME_WARP_COOLDOWN)
+        self.time_warp_active = (bool(self.time_warp_active) and self.time_warp_remaining > 0
+                                 and self.has_time_warp_unlocked())
+        if not self.time_warp_active:
+            self.time_warp_remaining = 0.0
 
     def calculate_max_affordable(self, cost):
         if not cost: return 0
