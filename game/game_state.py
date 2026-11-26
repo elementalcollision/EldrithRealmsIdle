@@ -223,7 +223,6 @@ class GameState:
                         multiplier *= (all_mult_base + lvl_bonus if all_mult_base >= 1.0 else all_mult_base * (1.0 + lvl_bonus))
         
         multiplier *= ability_logic.get_race_ability_multiplier(self, resource)
-        multiplier *= achievement_logic.get_achievement_multiplier(self, resource)
         multiplier *= self.get_research_multiplier(resource)
         
         multiplier *= (1.0 + (self.prestige_count * PRESTIGE_BONUS_BASE))
@@ -346,7 +345,9 @@ class GameState:
                 * self._geom_sum(C.RACE_UPGRADE_COST_GROWTH, cur_l - 1, count)}
 
     def _building_cost_reduction(self):
-        return 0.95 if achievement_logic.has_achievement(self, "first_building") else 1.0
+        # Errata E15: read from every building_cost_reduction reward, not a
+        # hardcoded 0.95 for first_building.
+        return ability_logic.get_building_cost_factor(self)
 
     def get_building_purchase_cost(self, building_id, count=1, current_count_override=None):
         if building_id not in BUILDINGS or count <= 0: return {}
@@ -605,12 +606,9 @@ class GameState:
         return self.calculate_global_multiplier(resource)
     
     def get_race_skill_multiplier(self, race_id, resource):
-        mult = 1.0
-        for m in ACHIEVEMENTS.get("race_skill_milestones",[]):
-            if self.achievements.get("race_skill_milestones",{}).get(m["id"]) and m["requirement"].get("race_skill")==race_id:
-                if f"{race_id}_{resource}_bonus" in m["reward"]: mult *= m["reward"][f"{race_id}_{resource}_bonus"]
-                if f"{race_id}_efficiency" in m["reward"]: mult *= m["reward"][f"{race_id}_efficiency"]
-        return mult
+        # Errata E15: {race}_{res}_bonus and {race}_efficiency now apply from
+        # any achievement category, through the shared reward reader.
+        return ability_logic.get_race_reward_multiplier(self, race_id, resource)
 
     def get_race_bonus_multiplier(self):
         mult = 1.0
@@ -661,12 +659,8 @@ class GameState:
         # Sqrt curve so doubling earnings ~= 1.4x points; classic idle pacing.
         base = int((self.total_earnings / req) ** 0.5)
         # Achievement bonuses
-        bonus_mult = 1.0
-        bonus_flat = 0
-        for m in ACHIEVEMENTS.get("prestige_milestones", []):
-            if self.achievements.get("prestige_milestones", {}).get(m["id"]):
-                bonus_mult *= m["reward"].get("prestige_point_multiplier", 1.0)
-                bonus_flat += m["reward"].get("prestige_point_bonus", 0)
+        # (errata E15: from any category, not only prestige_milestones)
+        bonus_mult, bonus_flat = ability_logic.get_prestige_point_modifiers(self)
         return max(0, int(base * bonus_mult) + bonus_flat)
 
     def perform_prestige(self):
@@ -845,6 +839,8 @@ class GameState:
         """
         lvl = self.prestige_upgrades.get("automatic_production", {}).get("level", 0)
         bonus = PRESTIGE_UPGRADES["automatic_production"]["effect"]["offline_progress"] * lvl
+        # Errata E15: offline_progress_bonus achievement rewards add to the rate.
+        bonus += ability_logic.get_offline_progress_bonus(self)
         return min(OFFLINE_PROGRESS_MAX_RATE, OFFLINE_PROGRESS_RATE + bonus)
 
     def _apply_save_data(self, data):

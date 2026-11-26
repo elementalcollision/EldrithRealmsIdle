@@ -1,5 +1,4 @@
 from game.constants import ACHIEVEMENTS, RESOURCE_TYPES, RACES, BASE_INCOME_RATE
-from game.logic import race_abilities
 
 # --- Achievement Checking Logic ---
 def check_achievements(game_state):
@@ -255,29 +254,16 @@ def check_race_skill_achievements(game_state):
                 game_state.achievements["race_skill_milestones"][milestone_id] = True
                 game_state.add_notification(f"Achievement unlocked: {milestone['name']}!", notification_type="achievement")
 
-def get_achievement_multiplier(game_state, resource):
-    """Get production multiplier from achievements"""
-    multiplier = 1.0
-    
-    # Check resource-specific multipliers from resource_milestones
-    for milestone_details in ACHIEVEMENTS["resource_milestones"]:
-        milestone_id = milestone_details["id"]
-        if game_state.achievements["resource_milestones"].get(milestone_id):
-            reward = milestone_details["reward"]
-            if f"{resource}_multiplier" in reward:
-                multiplier *= reward[f"{resource}_multiplier"]
-    
-    # Check global production multipliers from all achievement categories
+def unlocked_rewards(game_state):
+    """Yield (race_id or None, reward) for every unlocked achievement; the race
+    is the one a race-skill milestone belongs to. Rewards are read by
+    ``race_abilities._active_effects`` together with ability effects (errata
+    E15), so no key is applied in two places."""
     for category_key, achievement_list in ACHIEVEMENTS.items():
-        if category_key not in game_state.achievements: continue
-
+        unlocked = game_state.achievements.get(category_key, {})
         for achievement_details in achievement_list:
-            achievement_id = achievement_details["id"]
-            if game_state.achievements[category_key].get(achievement_id):
-                reward = achievement_details["reward"]
-                if "all_production" in reward:
-                    multiplier *= reward["all_production"]
-    return multiplier
+            if unlocked.get(achievement_details["id"]):
+                yield achievement_details["requirement"].get("race_skill"), achievement_details["reward"]
 
 def has_achievement(game_state, achievement_id):
     """Check if an achievement has been unlocked across all categories"""

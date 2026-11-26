@@ -475,7 +475,11 @@ class AchievementsTab(GameTab):
                 ]
                 # Reward block.
                 if m.get("reward"):
-                    rewards = ", ".join(f"{k}={v}" for k, v in m["reward"].items())
+                    # Errata E15: rewards no system reads are shown as such.
+                    rewards = ", ".join(
+                        f"{k}={v} (inactive: no transmutation yet)" if k in ability_logic.INACTIVE_EFFECTS
+                        else f"{k}={v}"
+                        for k, v in m["reward"].items())
                     lines += ["", f"[bold]Reward:[/bold] {rewards}"]
                 # Requirement (terse).
                 if m.get("requirement"):

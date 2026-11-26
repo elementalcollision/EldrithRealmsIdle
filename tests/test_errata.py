@@ -301,11 +301,11 @@ def test_e5_every_buyable_ability_changes_something():
 def test_e5_unimplemented_abilities_cannot_be_bought():
     g = GameState()
     g.prestige_count = 10
-    g.races["troll"].update(unlocked=True, count=5, level=100)
+    g.races["dragon"].update(unlocked=True, count=5, level=100)
     for res in g.resources:
         g.resources[res] = 1e12
-    assert ab.ability_status(g, "troll", "iron_stomach") == "unimplemented"
-    assert g.buy_race_ability("troll", "iron_stomach") is False
+    assert ab.ability_status(g, "dragon", "elder_breath") == "unimplemented"
+    assert g.buy_race_ability("dragon", "elder_breath") is False
     assert g.resources["stone"] == 1e12
 
 

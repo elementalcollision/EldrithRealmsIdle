@@ -248,7 +248,7 @@ RACES = {
             "parallel_realms": {
                 "name": "Parallel Realms",
                 "description": "Production occurs simultaneously across realms — global production +20%.",
-                "effects": {"parallel_production_bonus": 0.2, "global_multiplier": 1.2},
+                "effects": {"parallel_production_bonus": 0.2},
                 "unlock_requirements": {"race_level": 100, "prestige_level": 7, "resources": {"crystal": 100000000, "ancient_knowledge": 100000000}},
             },
         },
